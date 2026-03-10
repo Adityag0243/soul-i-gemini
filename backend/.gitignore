@@ -1,0 +1,24 @@
+.env
+.env.local
+.env.*.local
+node_modules/
+dist/
+*.log
+npm-debug.log*
+.DS_Store
+coverage/
+.vscode/
+*.swp
+*.swo
+*~
+
+# RSA Keys - NEVER commit to git
+keys/
+*.pem
+
+# Logs directory
+logs/
+README.md
+
+# Local documentation - entire docs folder
+docs/

@@ -1,0 +1,479 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+
+enum RoleCode {
+  USER
+  ADMIN
+}
+
+enum Permission {
+  GENERAL
+}
+
+enum AuthProvider {
+  EMAIL
+  GOOGLE
+  APPLE
+  ANONYMOUS
+}
+
+enum TokenType {
+  ACCESS
+  REFRESH
+  MAGIC_LINK
+}
+
+enum MessageRole {
+  USER
+  ASSISTANT
+  SYSTEM
+}
+
+enum CrisisLevel {
+  NONE
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum SubscriptionStatus {
+  FREE
+  ACTIVE
+  CANCELED
+  EXPIRED
+  PAST_DUE
+}
+
+enum PaymentProvider {
+  STRIPE
+  RAZORPAY
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  REFUNDED
+}
+
+enum FeedbackType {
+  BETTER
+  SAME
+  WORSE
+}
+
+//user and auth
+
+model User {
+  id       Int      @id @default(autoincrement())
+  name     String?
+  email    String?  @unique
+  password String?
+  status   Boolean  @default(true)
+  verified Boolean  @default(false)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  // Relations
+  roles             UserRoleRelation[]
+  keystores         Keystore[]
+  authIdentities    AuthIdentity[]
+  authTokens        AuthToken[]
+  chatSessions      ChatSession[]
+  emotionalStates   EmotionalState[]
+  dailyCheckins     DailyCheckin[]
+  practiceFeedbacks PracticeFeedback[]
+  userSubscriptions UserSubscription[]
+  payments          Payment[]
+  crisisEvents      CrisisEvent[]
+  referralsGiven    Referral[]         @relation("ReferrerRelation")
+  referralsReceived Referral[]         @relation("ReferredRelation")
+  analyticsEvents   AnalyticsEvent[]
+
+  @@index([email])
+  @@map("users")
+}
+
+model UserRoleRelation {
+  id     Int @id @default(autoincrement())
+  userId Int @map("user_id")
+  roleId Int @map("role_id")
+
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@unique([userId, roleId])
+  @@index([userId])
+  @@index([roleId])
+  @@map("user_role_relations")
+}
+
+model Role {
+  id     Int      @id @default(autoincrement())
+  code   RoleCode @unique
+  status Boolean  @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  users UserRoleRelation[]
+
+  @@index([code])
+  @@map("roles")
+}
+
+// Auth Identities - stores all login providers per user
+model AuthIdentity {
+  id     String       @id @default(uuid()) @db.Uuid
+  userId Int          @map("user_id")
+  provider AuthProvider
+
+  // EMAIL provider fields
+  email        String?
+  passwordHash String? @map("password_hash")
+  emailVerified Boolean @default(false) @map("email_verified")
+
+  // OAUTH provider fields (Google, Apple)
+  providerAccountId String? @map("provider_account_id")
+
+  // ANONYMOUS provider fields
+  souliKeyHash String? @map("souli_key_hash")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([provider, email])
+  @@index([provider, providerAccountId])
+  @@index([provider, souliKeyHash])
+  @@map("auth_identities")
+}
+
+// Auth Tokens - for magic links, password resets, etc.
+model AuthToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    Int       @map("user_id")
+  tokenHash String    @map("token_hash")
+  tokenType TokenType @map("token_type")
+  expiresAt DateTime  @map("expires_at")
+  revoked   Boolean   @default(false)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([tokenHash])
+  @@index([userId])
+  @@map("auth_tokens")
+}
+
+// Keystore - JWT session management
+model Keystore {
+  id           Int     @id @default(autoincrement())
+  clientId     Int     @map("client_id")
+  primaryKey   String  @map("primary_key")
+  secondaryKey String  @map("secondary_key")
+  status       Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  client User @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([clientId])
+  @@index([clientId, primaryKey, status])
+  @@index([clientId, primaryKey, secondaryKey])
+  @@map("keystores")
+}
+
+// API Keys for external integrations
+model ApiKey {
+  id          Int          @id @default(autoincrement())
+  key         String       @unique
+  version     Int          @default(1)
+  permissions Permission[]
+  comments    String[]
+  status      Boolean      @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@index([key, status])
+  @@map("api_keys")
+}
+
+// ============================================================
+// CHAT SYSTEM
+// ============================================================
+
+model ChatSession {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     Int      @map("user_id")
+  title      String?  @db.VarChar(255)
+  isArchived Boolean  @default(false) @map("is_archived")
+  startedAt  DateTime @default(now()) @map("started_at")
+  endedAt    DateTime? @map("ended_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages        ChatMessage[]
+  emotionalStates EmotionalState[]
+  crisisEvents    CrisisEvent[]
+
+  @@index([userId])
+  @@index([userId, isArchived])
+  @@map("chat_sessions")
+}
+
+model ChatMessage {
+  id          String      @id @default(uuid()) @db.Uuid
+  sessionId   String      @map("session_id") @db.Uuid
+  role        MessageRole
+  content     String      @db.Text
+  tokenCount  Int?        @map("token_count")
+  crisisLevel CrisisLevel @default(NONE) @map("crisis_level")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  session      ChatSession   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  crisisEvents CrisisEvent[]
+
+  @@index([sessionId])
+  @@index([sessionId, createdAt])
+  @@map("chat_messages")
+}
+
+// ============================================================
+// EMOTIONAL SYSTEM
+// ============================================================
+
+model EmotionalState {
+  id              String  @id @default(uuid()) @db.Uuid
+  userId          Int     @map("user_id")
+  sessionId       String? @map("session_id") @db.Uuid
+  detectedEmotion String  @map("detected_emotion") @db.VarChar(100)
+  energyNodeId    String? @map("energy_node_id") @db.Uuid
+  intensity       Int?
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user       User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  session    ChatSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  energyNode EnergyNode?  @relation(fields: [energyNodeId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([sessionId])
+  @@map("emotional_states")
+}
+
+model DailyCheckin {
+  id         String  @id @default(uuid()) @db.Uuid
+  userId     Int     @map("user_id")
+  moodScore  Int     @map("mood_score")
+  energyWord String? @map("energy_word") @db.VarChar(100)
+  reflection String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, createdAt])
+  @@map("daily_checkins")
+}
+
+// ============================================================
+// RAG KNOWLEDGE / PRACTICES
+// ============================================================
+
+model EnergyNode {
+  id          String  @id @default(uuid()) @db.Uuid
+  title       String  @db.VarChar(255)
+  description String? @db.Text
+  version     Int     @default(1)
+  isActive    Boolean @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  practices       Practice[]
+  emotionalStates EmotionalState[]
+
+  @@index([isActive])
+  @@map("energy_nodes")
+}
+
+model Practice {
+  id              String  @id @default(uuid()) @db.Uuid
+  energyNodeId    String? @map("energy_node_id") @db.Uuid
+  title           String  @db.VarChar(255)
+  durationMinutes Int?    @map("duration_minutes")
+  textScript      String? @map("text_script") @db.Text
+  audioUrl        String? @map("audio_url") @db.Text
+  videoUrl        String? @map("video_url") @db.Text
+  version         Int     @default(1)
+  isActive        Boolean @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  energyNode EnergyNode?        @relation(fields: [energyNodeId], references: [id], onDelete: SetNull)
+  feedbacks  PracticeFeedback[]
+
+  @@index([energyNodeId])
+  @@index([isActive])
+  @@map("practices")
+}
+
+model PracticeFeedback {
+  id         String       @id @default(uuid()) @db.Uuid
+  userId     Int          @map("user_id")
+  practiceId String       @map("practice_id") @db.Uuid
+  feedback   FeedbackType
+  reflection String?      @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  practice Practice @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([practiceId])
+  @@map("practice_feedbacks")
+}
+
+// ============================================================
+// SUBSCRIPTIONS
+// ============================================================
+
+model SubscriptionPlan {
+  id              String  @id @default(uuid()) @db.Uuid
+  name            String  @db.VarChar(100)
+  priceUsd        Decimal @map("price_usd") @db.Decimal(10, 2)
+  stripePriceId   String? @map("stripe_price_id") @db.VarChar(255)
+  razorpayPlanId  String? @map("razorpay_plan_id") @db.VarChar(255)
+  chatLimit       Int?    @map("chat_limit")
+  isActive        Boolean @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  userSubscriptions UserSubscription[]
+
+  @@map("subscription_plans")
+}
+
+model UserSubscription {
+  id                     String             @id @default(uuid()) @db.Uuid
+  userId                 Int                @map("user_id")
+  planId                 String             @map("plan_id") @db.Uuid
+  provider               PaymentProvider?
+  providerSubscriptionId String?            @map("provider_subscription_id") @db.VarChar(255)
+  status                 SubscriptionStatus @default(FREE)
+  currentPeriodEnd       DateTime?          @map("current_period_end")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan SubscriptionPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([status])
+  @@map("user_subscriptions")
+}
+
+// ============================================================
+// PAYMENTS
+// ============================================================
+
+model Payment {
+  id                String          @id @default(uuid()) @db.Uuid
+  userId            Int             @map("user_id")
+  provider          PaymentProvider
+  providerPaymentId String?         @map("provider_payment_id") @db.VarChar(255)
+  amount            Decimal         @db.Decimal(10, 2)
+  currency          String          @db.VarChar(10)
+  status            PaymentStatus   @default(PENDING)
+  rawWebhook        Json?           @map("raw_webhook")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([provider, providerPaymentId])
+  @@map("payments")
+}
+
+// ============================================================
+// CRISIS SYSTEM
+// ============================================================
+
+model CrisisEvent {
+  id               String      @id @default(uuid()) @db.Uuid
+  userId           Int         @map("user_id")
+  sessionId        String?     @map("session_id") @db.Uuid
+  level            CrisisLevel
+  triggerMessageId String?     @map("trigger_message_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  session        ChatSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  triggerMessage ChatMessage? @relation(fields: [triggerMessageId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([sessionId])
+  @@map("crisis_events")
+}
+
+// ============================================================
+// REFERRALS
+// ============================================================
+
+model Referral {
+  id             String @id @default(uuid()) @db.Uuid
+  referrerUserId Int    @map("referrer_user_id")
+  referredUserId Int?   @map("referred_user_id")
+  code           String @db.VarChar(50)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  referrer User  @relation("ReferrerRelation", fields: [referrerUserId], references: [id], onDelete: Cascade)
+  referred User? @relation("ReferredRelation", fields: [referredUserId], references: [id], onDelete: SetNull)
+
+  @@unique([code])
+  @@index([referrerUserId])
+  @@index([referredUserId])
+  @@map("referrals")
+}
+
+// ============================================================
+// ANALYTICS
+// ============================================================
+
+model AnalyticsEvent {
+  id        String @id @default(uuid()) @db.Uuid
+  userId    Int?   @map("user_id")
+  eventName String @map("event_name") @db.VarChar(100)
+  metadata  Json?
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([eventName])
+  @@index([createdAt])
+  @@map("analytics_events")
+}
