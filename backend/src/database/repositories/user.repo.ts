@@ -59,7 +59,7 @@ async function create(
     if (!role) throw new InternalError('Role must be defined.');
 
     // Create user and role relation in a transaction
-    const result = await prisma.$transaction(async (tx: typeof prisma) => {
+    const result = await prisma.$transaction(async (tx) => {
         // Create user
         const user = await tx.user.create({
             data: {

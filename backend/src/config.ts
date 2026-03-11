@@ -10,14 +10,16 @@ export const port = process.env.PORT;
 
 /** Base URL for the API (used by Swagger / Try it out). Must be http or https. */
 export const serverUrl =
-  process.env.SERVER_URL ||
-  (port ? `http://localhost:${port}` : 'http://localhost:9090');
+    process.env.SERVER_URL ||
+    (port ? `http://localhost:${port}` : 'http://localhost:9090');
 
 // JWT token configuration
 export const tokenInfo = {
-    accessTokenValidity: parseInt(process.env.ACCESS_TOKEN_VALIDITY_SEC || '0'),
+    accessTokenValidity: parseInt(
+        process.env.ACCESS_TOKEN_VALIDITY_SEC || '900',
+    ), // 15 minutes default
     refreshTokenValidity: parseInt(
-        process.env.REFRESH_TOKEN_VALIDITY_SEC || '0',
+        process.env.REFRESH_TOKEN_VALIDITY_SEC || '2592000', // 30 days default
     ),
     issuer: process.env.TOKEN_ISSUER || '',
     audience: process.env.TOKEN_AUDIENCE || '',
@@ -41,3 +43,18 @@ export const cookieOptions: CookieOptions = {
 export const logDirectory = process.env.LOG_DIRECTORY;
 
 export const dbUrl = process.env.DATABASE_URL ?? '';
+
+// Google OAuth Configuration
+export const googleConfig = {
+    clientId: process.env.GOOGLE_CLIENT_ID || '',
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET || '',
+    callbackUrl: process.env.CALLBACK_URL || '',
+};
+
+// AI Service Configuration (GCP Ollama)
+export const aiServiceConfig = {
+    serviceUrl: process.env.AI_SERVICE_URL || 'http://localhost:11434',
+    model: process.env.AI_MODEL || 'llama3.2',
+    maxTokens: parseInt(process.env.AI_MAX_TOKENS || '2048'),
+    temperature: parseFloat(process.env.AI_TEMPERATURE || '0.7'),
+};

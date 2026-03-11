@@ -22,6 +22,7 @@ enum AuthProvider {
   GOOGLE
   APPLE
   ANONYMOUS
+  MOBILE
 }
 
 enum TokenType {
@@ -147,6 +148,10 @@ model AuthIdentity {
   // OAUTH provider fields (Google, Apple)
   providerAccountId String? @map("provider_account_id")
 
+  // MOBILE provider fields
+  mobileNumber   String?  @map("mobile_number") @db.VarChar(20)
+  mobileVerified Boolean  @default(false) @map("mobile_verified")
+
   // ANONYMOUS provider fields
   souliKeyHash String? @map("souli_key_hash")
 
@@ -158,6 +163,7 @@ model AuthIdentity {
   @@index([provider, email])
   @@index([provider, providerAccountId])
   @@index([provider, souliKeyHash])
+  @@index([provider, mobileNumber])
   @@map("auth_identities")
 }
 

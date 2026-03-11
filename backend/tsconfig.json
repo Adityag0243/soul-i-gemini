@@ -40,7 +40,7 @@
         "forceConsistentCasingInFileNames": true,
         "resolveJsonModule": true,
         "moduleResolution": "node",
-        "ignoreDeprecations": "6.0", //if the node error comes just comment this line
+        // "ignoreDeprecations": "6.0", // Commented out: not needed for TS 5.9+
         "declaration": true,
         "declarationMap": true,
         "sourceMap": true,
