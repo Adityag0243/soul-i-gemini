@@ -1,7 +1,19 @@
 import dotenv from 'dotenv';
 import { CookieOptions } from 'express';
+import fs from 'fs';
+import path from 'path';
 
 dotenv.config();
+
+/** Read a PEM key: prefer env var, fallback to keys/ file */
+function readKey(envVar: string, filename: string): string {
+    const envValue = process.env[envVar];
+    if (envValue) return envValue;
+    const filePath = path.join(__dirname, '..', 'keys', filename);
+    if (fs.existsSync(filePath))
+        return fs.readFileSync(filePath, 'utf8').trim();
+    return '';
+}
 
 export const originUrl = process.env.ORIGIN_URL;
 export const isProduction = process.env.NODE_ENV === 'production';
@@ -23,8 +35,8 @@ export const tokenInfo = {
     ),
     issuer: process.env.TOKEN_ISSUER || '',
     audience: process.env.TOKEN_AUDIENCE || '',
-    jwtPrivateKey: process.env.JWT_PRIVATE_KEY || '',
-    jwtPublicKey: process.env.JWT_PUBLIC_KEY || '',
+    jwtPrivateKey: readKey('JWT_PRIVATE_KEY', 'private.pem'),
+    jwtPublicKey: readKey('JWT_PUBLIC_KEY', 'public.pem'),
 };
 
 // Cookie options

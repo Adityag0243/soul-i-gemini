@@ -10,8 +10,6 @@ import helmet from 'helmet';
 import swaggerUi from 'swagger-ui-express';
 import { generateOpenAPIDocument } from './docs/swagger';
 
-
-
 process.on('uncaughtException', (e) => {
     logger.error(e);
 });
@@ -40,18 +38,18 @@ app.use(cookieParser());
 app.use(helmet());
 
 if (!isProduction) {
-  app.use(
-    '/api-docs',
-    swaggerUi.serve,
-    swaggerUi.setup(generateOpenAPIDocument(), {
-      swaggerOptions: {
-        persistAuthorization: true,
-        tryItOutEnabled: true,
-        displayRequestDuration: true,
-      },
-      customCss: '.swagger-ui .topbar { display: none }',
-    })
-  );
+    app.use(
+        '/api-docs',
+        swaggerUi.serve,
+        swaggerUi.setup(generateOpenAPIDocument(), {
+            swaggerOptions: {
+                persistAuthorization: true,
+                tryItOutEnabled: true,
+                displayRequestDuration: true,
+            },
+            customCss: '.swagger-ui .topbar { display: none }',
+        }),
+    );
 }
 // Main routes
 app.use('/', router);

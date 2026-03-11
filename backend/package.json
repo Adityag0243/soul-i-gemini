@@ -9,6 +9,7 @@
         "dev": "nodemon",
         "start": "npm run build && npm run serve",
         "serve": "node -r dotenv/config dist/index.js",
+        "seed": "node scripts/seed.cjs",
         "test": "jest",
         "prettier:base": "prettier --parser typescript --single-quote",
         "prettier:check": "npm run prettier:base -- --list-different \"src/**/*.{ts,tsx}\"",
