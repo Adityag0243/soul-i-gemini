@@ -8,6 +8,7 @@ import {
     createSessionSchema,
     updateSessionSchema,
     sendMessageSchema,
+    saveVoiceTranscriptSchema,
     sessionIdParamSchema,
     getSessionsQuerySchema,
     getMessagesQuerySchema,
@@ -16,13 +17,9 @@ import * as ChatController from '../controllers/chat.controller';
 
 const router = Router();
 
-// All chat routes require authentication
 router.use(authMiddleware as unknown as RequestHandler);
 
-// ============================================================
-// SWAGGER DOCUMENTATION
-// ============================================================
-
+//swagger documentation
 registry.registerPath({
     method: 'post',
     path: '/chat/sessions',
@@ -149,6 +146,31 @@ registry.registerPath({
 });
 
 registry.registerPath({
+    method: 'post',
+    path: '/chat/messages/voice-transcript',
+    summary: 'Save Voice Transcript',
+    description:
+        'Persist voice STT transcript messages into an existing chat session without generating a new AI response.',
+    tags: ['Chat'],
+    security: [{ apiKey: [], bearerAuth: [] }],
+    request: {
+        body: {
+            content: {
+                'application/json': {
+                    schema: saveVoiceTranscriptSchema,
+                },
+            },
+        },
+    },
+    responses: {
+        201: { description: 'Voice transcript saved' },
+        400: { description: 'Validation error or session archived' },
+        401: { description: 'Authentication required' },
+        404: { description: 'Session not found' },
+    },
+});
+
+registry.registerPath({
     method: 'get',
     path: '/chat/sessions/{sessionId}/messages',
     summary: 'Get Messages',
@@ -162,11 +184,9 @@ registry.registerPath({
     },
 });
 
-// ============================================================
-// ROUTES
-// ============================================================
+// routes
 
-// Session routes
+// session routes
 router.post(
     '/sessions',
     validator(createSessionSchema, ValidationSource.BODY),
@@ -209,6 +229,12 @@ router.post(
     '/messages',
     validator(sendMessageSchema, ValidationSource.BODY),
     asyncHandler(ChatController.sendMessage),
+);
+
+router.post(
+    '/messages/voice-transcript',
+    validator(saveVoiceTranscriptSchema, ValidationSource.BODY),
+    asyncHandler(ChatController.saveVoiceTranscript),
 );
 
 router.get(

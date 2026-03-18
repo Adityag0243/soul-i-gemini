@@ -15,6 +15,7 @@ import {
     ChatSessionDto,
     ChatMessageDto,
     SendMessageResponseDto,
+    SaveVoiceTranscriptResponseDto,
     SessionListResponseDto,
     MessageListResponseDto,
 } from '../dto/chat.dto';
@@ -22,11 +23,10 @@ import {
     CreateSessionInput,
     UpdateSessionInput,
     SendMessageInput,
+    SaveVoiceTranscriptInput,
 } from '../schemas/chat.schema';
 
-// ============================================================
-// HELPER FUNCTIONS
-// ============================================================
+//helper functions
 
 type SessionWithCount = ChatSession & { _count?: { messages: number } };
 
@@ -55,13 +55,9 @@ function toMessageDto(message: ChatMessage): ChatMessageDto {
     };
 }
 
-// ============================================================
-// SESSION OPERATIONS
-// ============================================================
+//session opration
 
-/**
- * Create a new chat session
- */
+// create a new chat session
 export async function createSession(
     userId: number,
     input: CreateSessionInput,
@@ -73,7 +69,7 @@ export async function createSession(
 
     logger.info('Chat session created', { sessionId: session.id, userId });
 
-    // Track analytics event
+    // track analytics event
     await trackAnalyticsEvent(userId, 'session_created', {
         sessionId: session.id,
     });
@@ -81,9 +77,8 @@ export async function createSession(
     return toSessionDto(session);
 }
 
-/**
- * Get all chat sessions for a user
- */
+// get all chat sessions for a user
+
 export async function getSessions(
     userId: number,
     options?: {
@@ -94,7 +89,7 @@ export async function getSessions(
 ): Promise<SessionListResponseDto> {
     const sessions = await ChatSessionRepo.findByUserId(userId, options);
 
-    // Get total count for pagination
+    // get total count for pagination
     const total = await prisma.chatSession.count({
         where: {
             userId,
@@ -108,9 +103,7 @@ export async function getSessions(
     };
 }
 
-/**
- * Get a single chat session
- */
+// Get a single chat session
 export async function getSession(
     sessionId: string,
     userId: number,
@@ -124,9 +117,7 @@ export async function getSession(
     return toSessionDto(session);
 }
 
-/**
- * Update chat session (rename, archive)
- */
+// update chat session (rename, archive)
 export async function updateSession(
     sessionId: string,
     userId: number,
@@ -152,9 +143,8 @@ export async function updateSession(
     return toSessionDto(session);
 }
 
-/**
- * Archive a chat session
- */
+// archive a chat session
+
 export async function archiveSession(
     sessionId: string,
     userId: number,
@@ -175,14 +165,12 @@ export async function archiveSession(
     return toSessionDto(session);
 }
 
-/**
- * Delete a chat session (hard delete)
- */
+// delete a chat session (hard delete)
+
 export async function deleteSession(
     sessionId: string,
     userId: number,
 ): Promise<void> {
-    // Verify ownership
     const existingSession = await ChatSessionRepo.findByIdAndUserId(
         sessionId,
         userId,
@@ -196,20 +184,16 @@ export async function deleteSession(
     logger.info('Chat session deleted', { sessionId, userId });
 }
 
-// ============================================================
-// MESSAGE OPERATIONS
-// ============================================================
+//message operation
 
-/**
- * Send a message and get AI response
- */
+// send a message and get AI response
+
 export async function sendMessage(
     userId: number,
     input: SendMessageInput,
 ): Promise<SendMessageResponseDto> {
     const { sessionId, content } = input;
 
-    // Verify session ownership
     const session = await ChatSessionRepo.findByIdAndUserId(sessionId, userId);
     if (!session) {
         throw new NotFoundError('Chat session not found');
@@ -219,13 +203,13 @@ export async function sendMessage(
         throw new BadRequestError('Cannot send messages to archived session');
     }
 
-    // Get recent conversation history for context
+    // get recent conversation history for context
     const conversationHistory = await ChatMessageRepo.getRecentMessages(
         sessionId,
         20,
     );
 
-    // Save user message first
+    // save user message first
     const userMessage = await ChatMessageRepo.create({
         sessionId,
         role: MessageRole.USER,
@@ -235,19 +219,19 @@ export async function sendMessage(
 
     logger.info('User message saved', { sessionId, messageId: userMessage.id });
 
-    // Track chat started event if this is the first message
+    // track chat started event if this is the first message
     const messageCount = await ChatMessageRepo.countBySessionId(sessionId);
     if (messageCount === 1) {
         await trackAnalyticsEvent(userId, 'chat_started', { sessionId });
     }
 
-    // Generate AI response
+    // generate AI response
     const aiResponse = await AIService.generateResponse(
         conversationHistory,
         content,
     );
 
-    // Save assistant message
+    // save assistant message
     const assistantMessage = await ChatMessageRepo.create({
         sessionId,
         role: MessageRole.ASSISTANT,
@@ -275,7 +259,7 @@ export async function sendMessage(
         );
     }
 
-    // Store emotional state if detected
+    // store emotional state if detected
     if (aiResponse.detectedEmotion) {
         await storeEmotionalState(
             userId,
@@ -284,7 +268,7 @@ export async function sendMessage(
         );
     }
 
-    // Auto-update session title if it's the default and this is the first exchange
+    // auto-update session title if it's the default and this is the first exchange
     if (session.title === 'New Chat' && messageCount <= 2) {
         const newTitle = await generateSessionTitle(content);
         if (newTitle) {
@@ -300,9 +284,86 @@ export async function sendMessage(
     };
 }
 
-/**
- * Get messages for a session
- */
+// Save a voice transcript exchange into chat history
+
+export async function saveVoiceTranscript(
+    userId: number,
+    input: SaveVoiceTranscriptInput,
+): Promise<SaveVoiceTranscriptResponseDto> {
+    const { sessionId, userTranscript, assistantTranscript } = input;
+
+    const session = await ChatSessionRepo.findByIdAndUserId(sessionId, userId);
+    if (!session) {
+        throw new NotFoundError('Chat session not found');
+    }
+
+    if (session.isArchived) {
+        throw new BadRequestError(
+            'Cannot save transcripts to archived session',
+        );
+    }
+
+    const userCrisisLevel = AIService.detectCrisisLevel(userTranscript);
+
+    const userMessage = await ChatMessageRepo.create({
+        sessionId,
+        role: MessageRole.USER,
+        content: userTranscript,
+        crisisLevel: userCrisisLevel,
+    });
+
+    let assistantMessage: ChatMessage | null = null;
+    if (assistantTranscript) {
+        assistantMessage = await ChatMessageRepo.create({
+            sessionId,
+            role: MessageRole.ASSISTANT,
+            content: assistantTranscript,
+            tokenCount: input.assistantTokenCount,
+            crisisLevel:
+                input.crisisLevel ??
+                AIService.detectCrisisLevel(assistantTranscript),
+        });
+    }
+
+    if (
+        userCrisisLevel === CrisisLevel.HIGH ||
+        userCrisisLevel === CrisisLevel.MEDIUM
+    ) {
+        await handleCrisisEvent(
+            userId,
+            sessionId,
+            userMessage.id,
+            userCrisisLevel,
+        );
+    }
+
+    if (input.detectedEmotion) {
+        await storeEmotionalState(userId, sessionId, input.detectedEmotion);
+    }
+
+    await trackAnalyticsEvent(userId, 'voice_transcript_saved', {
+        sessionId,
+        hasAssistantTranscript: Boolean(assistantTranscript),
+    });
+
+    logger.info('Voice transcript saved to chat history', {
+        sessionId,
+        userId,
+        userMessageId: userMessage.id,
+        assistantMessageId: assistantMessage?.id ?? null,
+    });
+
+    return {
+        userMessage: toMessageDto(userMessage),
+        assistantMessage: assistantMessage
+            ? toMessageDto(assistantMessage)
+            : null,
+        detectedEmotion: input.detectedEmotion,
+        crisisLevel: userCrisisLevel,
+    };
+}
+
+// get messages for a session
 export async function getMessages(
     sessionId: string,
     userId: number,
@@ -311,7 +372,6 @@ export async function getMessages(
         offset?: number;
     },
 ): Promise<MessageListResponseDto> {
-    // Verify session ownership
     const session = await ChatSessionRepo.findByIdAndUserId(sessionId, userId);
     if (!session) {
         throw new NotFoundError('Chat session not found');
@@ -332,13 +392,10 @@ export async function getMessages(
     };
 }
 
-// ============================================================
-// HELPER FUNCTIONS
-// ============================================================
+//helper functions
 
-/**
- * Handle crisis event detection
- */
+//Handle crisis event detection
+
 async function handleCrisisEvent(
     userId: number,
     sessionId: string,
@@ -357,7 +414,7 @@ async function handleCrisisEvent(
 
         logger.warn('Crisis event recorded', { userId, sessionId, level });
 
-        // Track analytics
+        // track analytics
         await trackAnalyticsEvent(userId, 'crisis_detected', {
             sessionId,
             level,
@@ -368,9 +425,8 @@ async function handleCrisisEvent(
     }
 }
 
-/**
- * Store detected emotional state
- */
+// Store detected emotional state
+
 async function storeEmotionalState(
     userId: number,
     sessionId: string,
@@ -389,13 +445,12 @@ async function storeEmotionalState(
     }
 }
 
-/**
- * Generate a short title from the first message
- */
+// Generate a short title from the first message
+
 async function generateSessionTitle(
     firstMessage: string,
 ): Promise<string | null> {
-    // Simple title generation - take first 50 chars
+    // simple title generation - take first 50 chars
     const title = firstMessage.trim().slice(0, 50);
     if (title.length < firstMessage.length) {
         return title + '...';
@@ -403,9 +458,8 @@ async function generateSessionTitle(
     return title || null;
 }
 
-/**
- * Track analytics event
- */
+//track analytics event
+
 async function trackAnalyticsEvent(
     userId: number,
     eventName: string,
@@ -432,5 +486,6 @@ export default {
     archiveSession,
     deleteSession,
     sendMessage,
+    saveVoiceTranscript,
     getMessages,
 };

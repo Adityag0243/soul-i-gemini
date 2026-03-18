@@ -44,7 +44,7 @@ export interface AIResponse {
     detectedEmotion?: string;
 }
 
-// System prompt for Souli AI - Emotional wellness companion
+// system prompt for Souli AI - emotional wellness companion
 const SOULI_SYSTEM_PROMPT = `You are Souli, an empathetic AI emotional wellness companion. Your role is to:
 
 1. LISTEN with empathy and without judgment
@@ -66,9 +66,8 @@ IMPORTANT GUIDELINES:
 
 You are not a therapist. You are a supportive companion for daily emotional well-being.`;
 
-/**
- * Convert database message role to Ollama role
- */
+//convert database message role to Ollama role
+
 function toOllamaRole(role: MessageRole): 'user' | 'assistant' | 'system' {
     switch (role) {
         case MessageRole.USER:
@@ -82,9 +81,8 @@ function toOllamaRole(role: MessageRole): 'user' | 'assistant' | 'system' {
     }
 }
 
-/**
- * Build conversation history for AI context
- */
+//build conversation history for AI context
+
 function buildConversationHistory(
     messages: ChatMessage[],
 ): OllamaChatMessage[] {
@@ -105,14 +103,13 @@ function buildConversationHistory(
     return history;
 }
 
-/**
- * Detect crisis level from user message content
- * Returns the detected crisis level based on keywords and patterns
- */
+// detect crisis level from user message content
+// returns the detected crisis level based on keywords and patterns
+
 function detectCrisisLevel(content: string): CrisisLevel {
     const lowerContent = content.toLowerCase();
 
-    // HIGH crisis keywords (immediate safety concerns)
+    //high crisis keywords (immediate safety concerns)
     const highCrisisPatterns = [
         /suicid/i,
         /kill (my)?self/i,
@@ -123,6 +120,41 @@ function detectCrisisLevel(content: string): CrisisLevel {
         /self[- ]?harm/i,
         /cut(ting)? myself/i,
         /hurt myself/i,
+
+        // Intent/planning (core risk indicators)
+        /overdose/i,
+        /hang(ing?)? myself/i,
+        /jump(ing)? (off|from)/i,
+        /(jump|shoot|gun|knife|blade|pill)s?/i,
+        /plan to (die|kill)/i,
+        /way to (die|kill myself)/i,
+        /bridge( near)? (for )?jump/i, // From real cases[web:24]
+
+        // Ideation/expression
+        /suicid(al?)? (thought|idea)/i,
+        /not worth living/i,
+        /life not worth living/i,
+        /everyone( else)? (would be)? better off/i,
+        /world( would be)? better without me/i,
+        /tired of living/i,
+        /give up (on )?(life|everything)/i,
+        /nothing( left)? to live for/i,
+
+        // Urgency/immediacy
+        /right now/i, // Paired with ideation in context
+        /can't( anymore)?/i, // With harm/death
+        /too much( pain)?/i,
+
+        // Self-injury escalation
+        /burn(ing)? myself/i,
+        /bleed(ing)? out/i,
+        /(starv(e|ing)|anorexi)a/i, // Eating disorders link[web:21]
+
+        // Hopelessness/protective factors absence
+        /hopeless/i,
+        /no (hope|future)/i,
+        /pointless/i,
+        /burden (on|to)/i, // Perceived burdensomeness[web:19]
     ];
 
     for (const pattern of highCrisisPatterns) {

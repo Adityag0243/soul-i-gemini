@@ -28,6 +28,13 @@ export interface SendMessageResponseDto {
     crisisLevel: CrisisLevel;
 }
 
+export interface SaveVoiceTranscriptResponseDto {
+    userMessage: ChatMessageDto;
+    assistantMessage: ChatMessageDto | null;
+    detectedEmotion?: string;
+    crisisLevel: CrisisLevel;
+}
+
 export interface ChatSessionWithMessagesDto extends ChatSessionDto {
     messages: ChatMessageDto[];
 }

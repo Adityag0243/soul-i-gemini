@@ -1,18 +1,18 @@
 import { z } from 'zod';
 import { registry } from '../../../docs/swagger';
 
-// Create Chat Session Schema
+// create chat session schema
 export const createSessionSchema = z.object({
     title: z.string().max(255).optional(),
 });
 
-// Update Chat Session Schema
+// update chat session
 export const updateSessionSchema = z.object({
     title: z.string().max(255).optional(),
     isArchived: z.boolean().optional(),
 });
 
-// Get Sessions Query Schema
+// get sessions query
 export const getSessionsQuerySchema = z.object({
     includeArchived: z
         .string()
@@ -26,12 +26,12 @@ export const getSessionsQuerySchema = z.object({
     offset: z.string().transform(Number).pipe(z.number().min(0)).optional(),
 });
 
-// Session ID Param Schema
+// session id Param schema
 export const sessionIdParamSchema = z.object({
     sessionId: z.string().uuid('Invalid session ID'),
 });
 
-// Send Message Schema
+// send message
 export const sendMessageSchema = z.object({
     sessionId: z.string().uuid('Invalid session ID'),
     content: z
@@ -40,7 +40,28 @@ export const sendMessageSchema = z.object({
         .max(10000, 'Message too long'),
 });
 
-// Get Messages Query Schema
+// save voice transcript schema
+export const saveVoiceTranscriptSchema = z.object({
+    sessionId: z.string().uuid('Invalid session ID'),
+    userTranscript: z
+        .string()
+        .min(1, 'User transcript is required')
+        .max(10000, 'User transcript too long'),
+    assistantTranscript: z
+        .string()
+        .min(1, 'Assistant transcript cannot be empty')
+        .max(10000, 'Assistant transcript too long')
+        .optional(),
+    assistantTokenCount: z.number().int().min(0).optional(),
+    detectedEmotion: z
+        .string()
+        .min(1, 'Emotion cannot be empty')
+        .max(100)
+        .optional(),
+    crisisLevel: z.enum(['NONE', 'LOW', 'MEDIUM', 'HIGH']).optional(),
+});
+
+// get messages query schema
 export const getMessagesQuerySchema = z.object({
     limit: z
         .string()
@@ -50,14 +71,18 @@ export const getMessagesQuerySchema = z.object({
     offset: z.string().transform(Number).pipe(z.number().min(0)).optional(),
 });
 
-// Register schemas with OpenAPI registry
+// register schemas with OpenAPI registry
 registry.register('CreateSessionSchema', createSessionSchema);
 registry.register('UpdateSessionSchema', updateSessionSchema);
 registry.register('SendMessageSchema', sendMessageSchema);
+registry.register('SaveVoiceTranscriptSchema', saveVoiceTranscriptSchema);
 
 export type CreateSessionInput = z.infer<typeof createSessionSchema>;
 export type UpdateSessionInput = z.infer<typeof updateSessionSchema>;
 export type GetSessionsQuery = z.infer<typeof getSessionsQuerySchema>;
 export type SessionIdParam = z.infer<typeof sessionIdParamSchema>;
 export type SendMessageInput = z.infer<typeof sendMessageSchema>;
+export type SaveVoiceTranscriptInput = z.infer<
+    typeof saveVoiceTranscriptSchema
+>;
 export type GetMessagesQuery = z.infer<typeof getMessagesQuerySchema>;

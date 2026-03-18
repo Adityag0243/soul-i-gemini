@@ -14,17 +14,16 @@ import {
     SouliKeyRestoreInput,
 } from '../schemas/auth.schema';
 
-/**
- * Register with email and password
- * POST /auth/email/register
- */
+//register with email and password
+// POST /auth/email/register
+
 export async function emailRegister(
     req: Request<object, object, EmailRegisterInput>,
     res: Response,
 ): Promise<void> {
     const result = await AuthService.registerWithEmail(req.body);
 
-    // Set cookies for web clients
+    // set cookies for web clients
     setCookies(res, result.tokens);
 
     new SuccessCreatedResponse('Registration successful', {
@@ -33,17 +32,16 @@ export async function emailRegister(
     }).send(res);
 }
 
-/**
- * Login with email and password
- * POST /auth/email/login
- */
+// login with email and password
+// POST /auth/email/login
+
 export async function emailLogin(
     req: Request<object, object, EmailLoginInput>,
     res: Response,
 ): Promise<void> {
     const result = await AuthService.loginWithEmail(req.body);
 
-    // Set cookies for web clients
+    // set cookies for web clients
     setCookies(res, result.tokens);
 
     new SuccessResponse('Login successful', {
@@ -52,10 +50,9 @@ export async function emailLogin(
     }).send(res);
 }
 
-/**
- * Login/Register with Google
- * POST /auth/google
- */
+// login/register with Google
+// POST /auth/google
+
 export async function googleLogin(
     req: Request<object, object, GoogleLoginInput>,
     res: Response,
@@ -71,17 +68,16 @@ export async function googleLogin(
     }).send(res);
 }
 
-/**
- * Anonymous login - creates new anonymous user
- * POST /auth/anonymous
- */
+// anonymous login - creates new anonymous user
+// POST /auth/anonymous
+
 export async function anonymousLogin(
     req: Request<object, object, AnonymousLoginInput>,
     res: Response,
 ): Promise<void> {
     const result = await AuthService.loginAnonymous(req.body);
 
-    // Set cookies for web clients
+    // set cookies for web clients
     setCookies(res, result.tokens);
 
     new SuccessCreatedResponse('Anonymous account created', {
@@ -91,10 +87,9 @@ export async function anonymousLogin(
     }).send(res);
 }
 
-/**
- * Restore session with Souli Key
- * POST /auth/restore
- */
+// restore session with Souli Key
+// POST /auth/restore
+
 export async function souliKeyRestore(
     req: Request<object, object, SouliKeyRestoreInput>,
     res: Response,
@@ -110,10 +105,8 @@ export async function souliKeyRestore(
     }).send(res);
 }
 
-/**
- * Link Google account to current user
- * POST /auth/link/google
- */
+// link Google account to current user
+// POST /auth/link/google
 export async function linkGoogle(
     req: ProtectedRequest,
     res: Response,
@@ -125,10 +118,9 @@ export async function linkGoogle(
     new SuccessResponse('Google account linked successfully', null).send(res);
 }
 
-/**
- * Get linked providers for current user
- * GET /auth/providers
- */
+// get linked providers for current user
+// GET /auth/providers
+
 export async function getProviders(
     req: ProtectedRequest,
     res: Response,

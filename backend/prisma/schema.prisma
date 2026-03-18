@@ -7,7 +7,6 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-
 enum RoleCode {
   USER
   ADMIN
@@ -140,7 +139,7 @@ model AuthIdentity {
   userId Int          @map("user_id")
   provider AuthProvider
 
-  // EMAIL provider fields
+  // email provider fields
   email        String?
   passwordHash String? @map("password_hash")
   emailVerified Boolean @default(false) @map("email_verified")
@@ -148,11 +147,11 @@ model AuthIdentity {
   // OAUTH provider fields (Google, Apple)
   providerAccountId String? @map("provider_account_id")
 
-  // MOBILE provider fields
+  // mobile provider fields
   mobileNumber   String?  @map("mobile_number") @db.VarChar(20)
   mobileVerified Boolean  @default(false) @map("mobile_verified")
 
-  // ANONYMOUS provider fields
+  // anonymous provider fields
   souliKeyHash String? @map("souli_key_hash")
 
   createdAt DateTime @default(now()) @map("created_at")
@@ -220,10 +219,7 @@ model ApiKey {
   @@map("api_keys")
 }
 
-// ============================================================
-// CHAT SYSTEM
-// ============================================================
-
+// chat systems
 model ChatSession {
   id         String   @id @default(uuid()) @db.Uuid
   userId     Int      @map("user_id")
@@ -262,9 +258,7 @@ model ChatMessage {
   @@map("chat_messages")
 }
 
-// ============================================================
 // EMOTIONAL SYSTEM
-// ============================================================
 
 model EmotionalState {
   id              String  @id @default(uuid()) @db.Uuid
@@ -301,9 +295,7 @@ model DailyCheckin {
   @@map("daily_checkins")
 }
 
-// ============================================================
 // RAG KNOWLEDGE / PRACTICES
-// ============================================================
 
 model EnergyNode {
   id          String  @id @default(uuid()) @db.Uuid
@@ -359,9 +351,7 @@ model PracticeFeedback {
   @@map("practice_feedbacks")
 }
 
-// ============================================================
 // SUBSCRIPTIONS
-// ============================================================
 
 model SubscriptionPlan {
   id              String  @id @default(uuid()) @db.Uuid
@@ -398,9 +388,7 @@ model UserSubscription {
   @@map("user_subscriptions")
 }
 
-// ============================================================
 // PAYMENTS
-// ============================================================
 
 model Payment {
   id                String          @id @default(uuid()) @db.Uuid
@@ -421,9 +409,7 @@ model Payment {
   @@map("payments")
 }
 
-// ============================================================
 // CRISIS SYSTEM
-// ============================================================
 
 model CrisisEvent {
   id               String      @id @default(uuid()) @db.Uuid
@@ -443,9 +429,7 @@ model CrisisEvent {
   @@map("crisis_events")
 }
 
-// ============================================================
 // REFERRALS
-// ============================================================
 
 model Referral {
   id             String @id @default(uuid()) @db.Uuid
@@ -464,9 +448,7 @@ model Referral {
   @@map("referrals")
 }
 
-// ============================================================
 // ANALYTICS
-// ============================================================
 
 model AnalyticsEvent {
   id        String @id @default(uuid()) @db.Uuid

@@ -9,14 +9,14 @@ import {
     CreateSessionInput,
     UpdateSessionInput,
     SendMessageInput,
+    SaveVoiceTranscriptInput,
     GetSessionsQuery,
     GetMessagesQuery,
 } from '../schemas/chat.schema';
 
-/**
- * Create a new chat session
- * POST /chat/sessions
- */
+//create a new chat session
+// POST /chat/sessions
+
 export async function createSession(
     req: ProtectedRequest,
     res: Response,
@@ -27,10 +27,9 @@ export async function createSession(
     new SuccessCreatedResponse('Chat session created', session).send(res);
 }
 
-/**
- * Get all chat sessions for the current user
- * GET /chat/sessions
- */
+//get all chat sessions for the current user
+// GET /chat/sessions
+
 export async function getSessions(
     req: ProtectedRequest,
     res: Response,
@@ -46,10 +45,9 @@ export async function getSessions(
     new SuccessResponse('Sessions retrieved', result).send(res);
 }
 
-/**
- * Get a specific chat session
- * GET /chat/sessions/:sessionId
- */
+//get a specific chat session
+// GET /chat/sessions/:sessionId
+
 export async function getSession(
     req: ProtectedRequest,
     res: Response,
@@ -60,10 +58,9 @@ export async function getSession(
     new SuccessResponse('Session retrieved', session).send(res);
 }
 
-/**
- * Update a chat session (rename, archive)
- * PATCH /chat/sessions/:sessionId
- */
+// update a chat session (rename, archive)
+// PATCH /chat/sessions/:sessionId
+
 export async function updateSession(
     req: ProtectedRequest,
     res: Response,
@@ -80,10 +77,9 @@ export async function updateSession(
     new SuccessResponse('Session updated', session).send(res);
 }
 
-/**
- * Archive a chat session
- * POST /chat/sessions/:sessionId/archive
- */
+// archive a chat session
+// POST /chat/sessions/:sessionId/archive
+
 export async function archiveSession(
     req: ProtectedRequest,
     res: Response,
@@ -94,10 +90,9 @@ export async function archiveSession(
     new SuccessResponse('Session archived', session).send(res);
 }
 
-/**
- * Delete a chat session
- * DELETE /chat/sessions/:sessionId
- */
+// delete a chat session
+// DELETE /chat/sessions/:sessionId
+
 export async function deleteSession(
     req: ProtectedRequest,
     res: Response,
@@ -108,10 +103,9 @@ export async function deleteSession(
     new SuccessResponse('Session deleted', null).send(res);
 }
 
-/**
- * Send a message and get AI response
- * POST /chat/messages
- */
+//send a message and get AI response
+//POST /chat/messages
+
 export async function sendMessage(
     req: ProtectedRequest,
     res: Response,
@@ -122,10 +116,21 @@ export async function sendMessage(
     new SuccessCreatedResponse('Message sent', result).send(res);
 }
 
-/**
- * Get messages for a session
- * GET /chat/sessions/:sessionId/messages
- */
+// save voice transcript messages into chat history
+// POST /chat/messages/voice-transcript
+
+export async function saveVoiceTranscript(
+    req: ProtectedRequest,
+    res: Response,
+): Promise<void> {
+    const input = req.body as SaveVoiceTranscriptInput;
+    const result = await ChatService.saveVoiceTranscript(req.user.id, input);
+
+    new SuccessCreatedResponse('Voice transcript saved', result).send(res);
+}
+
+//get messages for a session
+//GET /chat/sessions/:sessionId/messages
 export async function getMessages(
     req: ProtectedRequest,
     res: Response,

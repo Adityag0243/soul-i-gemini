@@ -70,3 +70,12 @@ export const aiServiceConfig = {
     maxTokens: parseInt(process.env.AI_MAX_TOKENS || '2048'),
     temperature: parseFloat(process.env.AI_TEMPERATURE || '0.7'),
 };
+
+// LiveKit Voice Configuration
+export const voiceConfig = {
+    url: process.env.LIVEKIT_URL || '',
+    apiKey: process.env.LIVEKIT_API_KEY || '',
+    apiSecret: process.env.LIVEKIT_API_SECRET || '',
+    defaultRoom: process.env.LIVEKIT_ROOM || 'souli-room',
+    tokenValiditySec: parseInt(process.env.LIVEKIT_TOKEN_VALIDITY_SEC || '900'),
+};

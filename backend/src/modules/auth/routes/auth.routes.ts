@@ -15,9 +15,7 @@ import * as AuthController from '../controllers/auth.controller';
 
 const router = Router();
 
-// ============================================================
-// SWAGGER DOCUMENTATION
-// ============================================================
+//swagger documentation
 
 registry.registerPath({
     method: 'post',
@@ -170,46 +168,44 @@ registry.registerPath({
     },
 });
 
-// ============================================================
-// ROUTES
-// ============================================================
+// routes
 
-// Email Registration
+//register
 router.post(
     '/email/register',
     validator(emailRegisterSchema, ValidationSource.BODY),
     asyncHandler(AuthController.emailRegister),
 );
 
-// Email Login
+//login
 router.post(
     '/email/login',
     validator(emailLoginSchema, ValidationSource.BODY),
     asyncHandler(AuthController.emailLogin),
 );
 
-// Google Login/Register
+// google login/register
 router.post(
     '/google',
     validator(googleLoginSchema, ValidationSource.BODY),
     asyncHandler(AuthController.googleLogin),
 );
 
-// Anonymous Login
+// anonymous login
 router.post(
     '/anonymous',
     validator(anonymousLoginSchema, ValidationSource.BODY),
     asyncHandler(AuthController.anonymousLogin),
 );
 
-// Restore with Souli Key
+// restore with souli key
 router.post(
     '/restore',
     validator(souliKeyRestoreSchema, ValidationSource.BODY),
     asyncHandler(AuthController.souliKeyRestore),
 );
 
-// Protected routes - require authentication
+// protected routes
 router.post(
     '/link/google',
     authMiddleware as unknown as RequestHandler,
