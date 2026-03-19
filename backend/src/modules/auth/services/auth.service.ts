@@ -29,16 +29,12 @@ import {
 // Google OAuth client
 const googleClient = new OAuth2Client(googleConfig.clientId);
 
-/**
- * Generate a random Souli Key (16 characters for secure anonymous access)
- */
+// Generate a random Souli Key (16 characters for secure anonymous access)
 function generateSouliKey(): string {
     return crypto.randomBytes(24).toString('base64url').slice(0, 24);
 }
 
-/**
- * Generate access and refresh token keys
- */
+// Generate access and refresh token keys
 function generateTokenKeys(): {
     accessTokenKey: string;
     refreshTokenKey: string;
@@ -49,9 +45,7 @@ function generateTokenKeys(): {
     };
 }
 
-/**
- * Hash password using Argon2
- */
+// hash password using Argon2
 async function hashPassword(password: string): Promise<string> {
     return argon2.hash(password, {
         type: argon2.argon2id,
@@ -61,9 +55,7 @@ async function hashPassword(password: string): Promise<string> {
     });
 }
 
-/**
- * Verify password using Argon2
- */
+// Verify password using Argon2
 async function verifyPassword(
     password: string,
     hash: string,
@@ -75,9 +67,7 @@ async function verifyPassword(
     }
 }
 
-/**
- * Verify Google ID token and extract user info
- */
+// verify google id token and extract user info
 async function verifyGoogleToken(idToken: string): Promise<GoogleUserPayload> {
     try {
         const ticket = await googleClient.verifyIdToken({
@@ -105,9 +95,8 @@ async function verifyGoogleToken(idToken: string): Promise<GoogleUserPayload> {
     }
 }
 
-/**
- * Transform user to UserDataDto
- */
+// transform user to UserDataDto
+
 function toUserData(
     user: User & { roles?: { role: { id: number; code: RoleCode } }[] },
 ): UserDataDto {
@@ -124,9 +113,8 @@ function toUserData(
     };
 }
 
-/**
- * Create user with role and keystore in a transaction
- */
+// Create user with role and keystore in a transaction
+
 async function createUserWithSession(
     userData: {
         name?: string;
@@ -206,9 +194,8 @@ async function createUserWithSession(
     return result;
 }
 
-/**
- * Create keystore session for existing user
- */
+// Create keystore session for existing user
+
 async function createSession(
     userId: number,
 ): Promise<{ primaryKey: string; secondaryKey: string }> {
@@ -228,31 +215,24 @@ async function createSession(
     };
 }
 
-// ============================================================
 // AUTH SERVICE METHODS
-// ============================================================
 
-/**
- * Register user with email and password
- */
+// register user with email and password
+
 export async function registerWithEmail(
     input: EmailRegisterInput,
 ): Promise<AuthResponseDto> {
     const { name, email, password } = input;
 
-    // Check if email already exists
     const existingIdentity = await AuthIdentityRepo.findByProviderAndEmail(
         AuthProvider.EMAIL,
         email,
     );
-
     if (existingIdentity) {
         throw new BadRequestError('User already registered with this email');
     }
-
     // Hash password
     const passwordHash = await hashPassword(password);
-
     // Create user with session
     const { user, keystore } = await createUserWithSession({
         name,
@@ -282,15 +262,14 @@ export async function registerWithEmail(
     };
 }
 
-/**
- * Login with email and password
- */
+// Login with email and password
+
 export async function loginWithEmail(
     input: EmailLoginInput,
 ): Promise<AuthResponseDto> {
     const { email, password } = input;
 
-    // Find auth identity
+    // find auth identity
     const identity = await AuthIdentityRepo.findByProviderAndEmail(
         AuthProvider.EMAIL,
         email,
@@ -300,13 +279,13 @@ export async function loginWithEmail(
         throw new AuthFailureError('Invalid email or password');
     }
 
-    // Verify password
+    // verify password
     const isValid = await verifyPassword(password, identity.passwordHash);
     if (!isValid) {
         throw new AuthFailureError('Invalid email or password');
     }
 
-    // Get user with roles
+    // get user with roles
     const user = await prisma.user.findUnique({
         where: { id: identity.userId },
         include: {
@@ -327,10 +306,10 @@ export async function loginWithEmail(
         throw new AuthFailureError('User account is disabled');
     }
 
-    // Create new session
+    // create new session
     const keystore = await createSession(user.id);
 
-    // Generate tokens
+    // generate tokens
     const tokens = await createTokens(
         user,
         keystore.primaryKey,
@@ -343,18 +322,17 @@ export async function loginWithEmail(
     };
 }
 
-/**
- * Login/Register with Google
- */
+// Login/Register with Google
+
 export async function loginWithGoogle(
     input: GoogleLoginInput,
 ): Promise<AuthResponseDto> {
     const { idToken } = input;
 
-    // Verify Google token
+    // verify Google token
     const googleUser = await verifyGoogleToken(idToken);
 
-    // Check if user exists with this Google account
+    // check if user exists with this Google account
     let identity = await AuthIdentityRepo.findByProviderAndAccountId(
         AuthProvider.GOOGLE,
         googleUser.sub,
@@ -364,7 +342,7 @@ export async function loginWithGoogle(
     let keystore: { primaryKey: string; secondaryKey: string };
 
     if (identity) {
-        // Existing user - login
+        // existing user - login
         const existingUser = await prisma.user.findUnique({
             where: { id: identity.userId },
             include: {
@@ -388,7 +366,7 @@ export async function loginWithGoogle(
         user = existingUser;
         keystore = await createSession(user.id);
     } else {
-        // New user - register
+        // new user - register
         const result = await createUserWithSession({
             name: googleUser.name,
             email: googleUser.email,
@@ -398,7 +376,7 @@ export async function loginWithGoogle(
         user = result.user;
         keystore = result.keystore;
 
-        // Create auth identity
+        // create auth identity
         await AuthIdentityRepo.create({
             userId: user.id,
             provider: AuthProvider.GOOGLE,
@@ -408,7 +386,7 @@ export async function loginWithGoogle(
         });
     }
 
-    // Generate tokens
+    // generate tokens
     const tokens = await createTokens(
         user,
         keystore.primaryKey,
@@ -421,9 +399,8 @@ export async function loginWithGoogle(
     };
 }
 
-/**
- * Anonymous login - creates a new anonymous user with a Souli Key
- */
+// Anonymous login - creates a new anonymous user with a Souli Key
+
 export async function loginAnonymous(
     input: AnonymousLoginInput,
 ): Promise<AnonymousAuthResponseDto> {
@@ -444,7 +421,7 @@ export async function loginAnonymous(
         souliKeyHash,
     });
 
-    // Generate tokens
+    // generate tokens
     const tokens = await createTokens(
         user,
         keystore.primaryKey,

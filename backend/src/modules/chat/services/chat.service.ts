@@ -229,6 +229,7 @@ export async function sendMessage(
     const aiResponse = await AIService.generateResponse(
         conversationHistory,
         content,
+        sessionId,
     );
 
     // save assistant message

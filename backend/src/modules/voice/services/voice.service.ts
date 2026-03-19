@@ -1,7 +1,11 @@
 import { AccessToken } from 'livekit-server-sdk';
 import { InternalError } from '../../../core/api-error';
 import { voiceConfig } from '../../../config';
-import { CreateVoiceTokenInput } from '../schemas/voice.schema';
+import ChatService from '../../chat/services/chat.service';
+import {
+    CreateVoiceTokenInput,
+    CreateVoiceBootstrapInput,
+} from '../schemas/voice.schema';
 
 const LIVEKIT_TOKEN_VALIDITY_SECONDS = Math.max(
     60,
@@ -34,6 +38,12 @@ export interface VoiceTokenResponse {
     participantIdentity: string;
     participantName: string;
     expiresAt: string;
+}
+
+export interface VoiceBootstrapResponse extends VoiceTokenResponse {
+    chatSessionId: string;
+    transcriptEndpoint: string;
+    textMessageEndpoint: string;
 }
 
 export async function createVoiceToken(
@@ -84,6 +94,37 @@ export async function createVoiceToken(
     };
 }
 
+export async function createVoiceBootstrap(
+    userId: number,
+    input: CreateVoiceBootstrapInput,
+): Promise<VoiceBootstrapResponse> {
+    let chatSessionId = input.sessionId;
+
+    if (chatSessionId) {
+        await ChatService.getSession(chatSessionId, userId);
+    } else {
+        const created = await ChatService.createSession(userId, {
+            title: 'Voice Chat',
+        });
+        chatSessionId = created.id;
+    }
+
+    const tokenResult = await createVoiceToken(userId, {
+        roomName: input.roomName,
+        sessionId: chatSessionId,
+        participantName: input.participantName,
+        platform: input.platform,
+    });
+
+    return {
+        ...tokenResult,
+        chatSessionId,
+        transcriptEndpoint: '/chat/messages/voice-transcript',
+        textMessageEndpoint: '/chat/messages',
+    };
+}
+
 export default {
     createVoiceToken,
+    createVoiceBootstrap,
 };

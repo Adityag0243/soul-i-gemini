@@ -37,6 +37,19 @@ interface OllamaChatResponse {
     eval_duration?: number;
 }
 
+interface SouliChatRequest {
+    message: string;
+    session_id: string;
+}
+
+interface SouliChatResponse {
+    session_id: string;
+    reply: string;
+    phase: string;
+    energy_node: string | null;
+    turn_count: number;
+}
+
 export interface AIResponse {
     content: string;
     tokenCount?: number;
@@ -101,6 +114,20 @@ function buildConversationHistory(
     }
 
     return history;
+}
+
+function buildServiceUrl(path: string): string {
+    const base = aiServiceConfig.serviceUrl.replace(/\/$/, '');
+    return `${base}${path}`;
+}
+
+function shouldTryOllamaCompatibilityFallback(): boolean {
+    const base = aiServiceConfig.serviceUrl.toLowerCase();
+    return (
+        base.includes('localhost:11434') ||
+        base.includes('127.0.0.1:11434') ||
+        base.endsWith(':11434')
+    );
 }
 
 // detect crisis level from user message content
@@ -331,40 +358,150 @@ async function callOllamaAPI(
     }
 }
 
+async function callSouliChatAPI(
+    userMessage: string,
+    sessionId: string,
+): Promise<SouliChatResponse> {
+    const requestBody: SouliChatRequest = {
+        message: userMessage,
+        session_id: sessionId,
+    };
+
+    try {
+        const response = await fetch(buildServiceUrl('/chat'), {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(requestBody),
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            logger.error('Souli chat API error:', {
+                status: response.status,
+                error: errorText,
+            });
+            throw new InternalError('AI service unavailable');
+        }
+
+        return (await response.json()) as SouliChatResponse;
+    } catch (error) {
+        if (error instanceof InternalError) throw error;
+        logger.error('Souli chat API connection failed:', error);
+        throw new InternalError('AI service connection failed');
+    }
+}
+
+export interface VoiceAIResponse {
+    audio: Buffer;
+    transcript: string;
+    reply: string;
+    phase?: string;
+    energyNode?: string;
+    turnCount?: number;
+}
+
+export async function callSouliVoiceAPI(params: {
+    sessionId: string;
+    audioBuffer: Buffer;
+    filename?: string;
+    mimeType?: string;
+}): Promise<VoiceAIResponse> {
+    const form = new FormData();
+    const fileName = params.filename || 'audio.wav';
+    const mimeType = params.mimeType || 'audio/wav';
+
+    form.append('session_id', params.sessionId);
+    form.append(
+        'audio',
+        new Blob([params.audioBuffer], { type: mimeType }),
+        fileName,
+    );
+
+    const response = await fetch(buildServiceUrl('/voice'), {
+        method: 'POST',
+        body: form,
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text();
+        logger.error('Souli voice API error:', {
+            status: response.status,
+            error: errorText,
+        });
+        throw new InternalError('Voice AI service unavailable');
+    }
+
+    const audio = Buffer.from(await response.arrayBuffer());
+    return {
+        audio,
+        transcript: response.headers.get('x-transcript') || '',
+        reply: response.headers.get('x-reply') || '',
+        phase: response.headers.get('x-phase') || undefined,
+        energyNode: response.headers.get('x-energy-node') || undefined,
+        turnCount:
+            Number(response.headers.get('x-turn-count') || 0) || undefined,
+    };
+}
+
 /**
  * Generate AI response for a conversation
  */
 export async function generateResponse(
     conversationHistory: ChatMessage[],
     userMessage: string,
+    sessionId: string,
 ): Promise<AIResponse> {
     // Detect crisis level and emotion from user message
     const crisisLevel = detectCrisisLevel(userMessage);
     const detectedEmotion = detectEmotion(userMessage);
 
-    // Build conversation context
-    const messages = buildConversationHistory(conversationHistory);
+    try {
+        // Preferred mode: call Souli API deployed by AI team
+        const response = await callSouliChatAPI(userMessage, sessionId);
 
-    // Add the new user message
-    messages.push({
-        role: 'user',
-        content: userMessage,
-    });
+        return {
+            content: response.reply,
+            crisisLevel,
+            detectedEmotion,
+        };
+    } catch (error) {
+        if (!shouldTryOllamaCompatibilityFallback()) {
+            logger.error(
+                'Souli /chat call failed and Ollama compatibility fallback is disabled for current AI_SERVICE_URL',
+                error,
+            );
+            return {
+                content: getFallbackResponse(crisisLevel),
+                crisisLevel,
+                detectedEmotion,
+            };
+        }
 
-    // Add crisis-specific system guidance if needed
-    if (crisisLevel === CrisisLevel.HIGH) {
-        messages.push({
-            role: 'system',
-            content: `IMPORTANT: The user appears to be in significant distress. Respond with extra care, 
-validate their feelings, and gently encourage them to reach out to a mental health professional 
-or crisis helpline. Do not dismiss their feelings. Be compassionate and present.`,
-        });
+        logger.warn(
+            'Souli /chat call failed, trying Ollama compatibility mode',
+        );
     }
 
+    // Backward compatibility mode for local Ollama setup
     try {
-        // Call AI service
-        const response = await callOllamaAPI(messages);
+        const messages = buildConversationHistory(conversationHistory);
+        messages.push({
+            role: 'user',
+            content: userMessage,
+        });
 
+        if (crisisLevel === CrisisLevel.HIGH) {
+            messages.push({
+                role: 'system',
+                content: `IMPORTANT: The user appears to be in significant distress. Respond with extra care, 
+validate their feelings, and gently encourage them to reach out to a mental health professional 
+or crisis helpline. Do not dismiss their feelings. Be compassionate and present.`,
+            });
+        }
+
+        const response = await callOllamaAPI(messages);
         return {
             content: response.message.content,
             tokenCount: response.eval_count,
@@ -373,8 +510,6 @@ or crisis helpline. Do not dismiss their feelings. Be compassionate and present.
         };
     } catch (error) {
         logger.error('AI response generation failed:', error);
-
-        // Return a graceful fallback response
         return {
             content: getFallbackResponse(crisisLevel),
             crisisLevel,
@@ -413,14 +548,26 @@ Take a gentle breath, and know that this moment will pass.`;
  */
 export async function healthCheck(): Promise<boolean> {
     try {
-        const response = await fetch(`${aiServiceConfig.serviceUrl}/api/tags`, {
+        const primary = await fetch(`${aiServiceConfig.serviceUrl}/health`, {
             method: 'GET',
             headers: {
                 'Content-Type': 'application/json',
             },
         });
 
-        return response.ok;
+        if (primary.ok) return true;
+    } catch {
+        // try local Ollama compatibility check below
+    }
+
+    try {
+        const fallback = await fetch(`${aiServiceConfig.serviceUrl}/api/tags`, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+        });
+        return fallback.ok;
     } catch {
         return false;
     }
