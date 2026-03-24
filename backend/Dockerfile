@@ -2,16 +2,21 @@ FROM node:22
 
 USER node
 
-RUN mkdir -p /home/node/app && chown -R node:node /home/node/app
-
 WORKDIR /home/node/app
 
-COPY --chown=node:node . . 
+COPY --chown=node:node package*.json ./
 
-RUN npm install 
+RUN npm install
 
-# container exposed network port number
+COPY --chown=node:node . .
+
+# Increase memory for build
+ENV NODE_OPTIONS=--max-old-space-size=1024
+
+# ✅ Build at image time (NOT runtime)
+RUN npm run build
+
 EXPOSE 8000
 
-# command to run within the container
-CMD [ "npm", "start" ]
+# ✅ Directly run built code
+CMD ["node", "-r", "dotenv/config", "dist/index.js"]
