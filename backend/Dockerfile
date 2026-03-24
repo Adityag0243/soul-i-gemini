@@ -13,6 +13,9 @@ COPY --chown=node:node . .
 # Increase memory for build
 ENV NODE_OPTIONS=--max-old-space-size=1024
 
+# Generate Prisma client
+RUN npx prisma generate
+
 # ✅ Build at image time (NOT runtime)
 RUN npm run build
 
