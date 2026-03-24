@@ -10,6 +10,9 @@ RUN npm install
 
 COPY --chown=node:node . .
 
+# Check if swagger.ts is copied
+RUN ls -la src/docs/
+
 # Increase memory for build
 ENV NODE_OPTIONS=--max-old-space-size=1024
 
