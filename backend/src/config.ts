@@ -79,3 +79,41 @@ export const voiceConfig = {
     defaultRoom: process.env.LIVEKIT_ROOM || 'souli-room',
     tokenValiditySec: parseInt(process.env.LIVEKIT_TOKEN_VALIDITY_SEC || '900'),
 };
+
+// AWS SES Email Configuration
+export const sesConfig = {
+    awsRegion: process.env.AWS_REGION || 'ap-south-1',
+    awsAccessKeyId: process.env.AWS_ACCESS_KEY_ID || '',
+    awsSecretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || '',
+    fromEmail: process.env.FROM_EMAIL || 'noreply@souli.com',
+    fromName: process.env.FROM_NAME || 'Souli',
+};
+
+// Payment Gateway Configuration
+export const paymentConfig = {
+    // Stripe
+    stripeSecretKey: process.env.STRIPE_SECRET_KEY || '',
+    stripePublishableKey: process.env.STRIPE_PUBLISHABLE_KEY || '',
+    stripePdfEndpoint:
+        process.env.STRIPE_PDF_ENDPOINT || 'https://api.stripe.com',
+
+    // Razorpay
+    razorpayKeyId: process.env.RAZORPAY_KEY_ID || '',
+    razorpayKeySecret: process.env.RAZORPAY_KEY_SECRET || '',
+
+    // Webhook
+    stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET || '',
+    razorpayWebhookSecret: process.env.RAZORPAY_WEBHOOK_SECRET || '',
+
+    // Subscription reminders (in days before expiry)
+    subscriptionReminderDays: parseInt(
+        process.env.SUBSCRIPTION_REMINDER_DAYS || '7',
+    ),
+};
+
+// Configure SES for export (backward compatibility)
+export const configS3 = {
+    awsRegion: process.env.AWS_REGION || 'ap-south-1',
+    awsAccessKeyId: process.env.AWS_ACCESS_KEY_ID || '',
+    awsSecretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || '',
+};

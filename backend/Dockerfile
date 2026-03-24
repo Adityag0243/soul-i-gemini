@@ -11,7 +11,7 @@ COPY --chown=node:node . .
 RUN npm install 
 
 # container exposed network port number
-EXPOSE 3000
+EXPOSE 8000
 
 # command to run within the container
 CMD [ "npm", "start" ]

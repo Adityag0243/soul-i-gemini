@@ -8,10 +8,10 @@ process.on('unhandledRejection', (reason, promise) => {
     process.exit(1);
 });
 
-import logger from './core/logger.js';
-import { port } from './config.js';
-import { connectDB } from './database/index.js';
-import { app } from './app.js';
+import logger from './core/logger';
+import { port } from './config';
+import { connectDB } from './database/index';
+import { app } from './app';
 
 async function start() {
     try {

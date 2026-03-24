@@ -1,11 +1,12 @@
 import { Router, RequestHandler } from 'express';
-import healthRoutes from './health/index.js';
-import { apiKeyMiddleware } from './auth/api-key.js';
-import permission from '../middlewares/permission.middleware.js';
+import healthRoutes from './health/index';
+import { apiKeyMiddleware } from './auth/api-key';
+import permission from '../middlewares/permission.middleware';
 // import authRoutes from './auth';
 import { authRoutes as authModuleRoutes } from '../modules/auth';
 import { chatRoutes } from '../modules/chat';
 import { voiceRoutes } from '../modules/voice';
+import { paymentRoutes } from '../modules/payments/routes/payment.routes';
 import { Permission } from '@prisma/client';
 
 const router = Router();
@@ -16,16 +17,16 @@ router.use(apiKeyMiddleware);
 
 router.use(permission(Permission.GENERAL) as RequestHandler);
 
-// Legacy auth routes (kept for backward compatibility)
+// legacy auth routes
 // router.use('/auth', authRoutes);
 
 // modular auth routes
 router.use('/auth', authModuleRoutes);
 
-// Chat routes
 router.use('/chat', chatRoutes);
 
-// Voice routes
 router.use('/voice', voiceRoutes);
+
+router.use('/payments', paymentRoutes);
 
 export default router;

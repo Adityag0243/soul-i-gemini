@@ -1,7 +1,7 @@
 import { NextFunction, Request, Response } from 'express';
-import logger from './../core/logger.js';
-import { isProduction } from './../config.js';
-import { ApiError, ErrorType } from '../core/api-error.js';
+import logger from './../core/logger';
+import { isProduction } from './../config';
+import { ApiError, ErrorType } from '../core/api-error';
 
 export const errorHandler = (
     err: Error,

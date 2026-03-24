@@ -1,0 +1,464 @@
+{
+    "info": {
+        "_postman_id": "souli-payments-api-v1",
+        "name": "Souli Payments API",
+        "description": "Production-grade payment system for Souli mobile app. Supports Stripe and Razorpay payment gateways with subscription management.",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+        "_exporter_id": "12345"
+    },
+    "item": [
+        {
+            "name": "Setup & Auth",
+            "description": "Initial setup and authentication endpoints",
+            "item": [
+                {
+                    "name": "Login (Get JWT Token)",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"email\": \"user@example.com\",\n  \"password\": \"password123\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/auth/login",
+                            "host": ["{{base_url}}"],
+                            "path": ["auth", "login"]
+                        },
+                        "description": "Get JWT token for authenticated requests. Save response.data.token as jwt_token variable."
+                    },
+                    "response": []
+                }
+            ]
+        },
+        {
+            "name": "Payment Plans",
+            "description": "Retrieve available subscription plans",
+            "item": [
+                {
+                    "name": "Get All Plans",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{jwt_token}}"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/payments/plans",
+                            "host": ["{{base_url}}"],
+                            "path": ["api", "payments", "plans"]
+                        },
+                        "description": "Fetch all active subscription plans. Save first plan's ID as plan_id variable for testing."
+                    },
+                    "response": []
+                }
+            ]
+        },
+        {
+            "name": "Stripe Checkout",
+            "description": "Stripe payment flow",
+            "item": [
+                {
+                    "name": "1. Initiate Stripe Checkout",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{jwt_token}}"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"planId\": \"{{plan_id}}\",\n  \"provider\": \"stripe\",\n  \"redirectUrl\": \"https://souli.app/payment-success\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/payments/checkout/initiate",
+                            "host": ["{{base_url}}"],
+                            "path": ["api", "payments", "checkout", "initiate"]
+                        },
+                        "description": "Create Stripe checkout session. Copy response.data.session.url and save sessionId as stripe_session_id."
+                    },
+                    "response": []
+                },
+                {
+                    "name": "2. Auto-Verify Stripe (Webhook Simulation)",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{jwt_token}}"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"provider\": \"stripe\",\n  \"orderId\": \"{{stripe_session_id}}\",\n  \"paymentId\": \"\",\n  \"signature\": \"\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/payments/verify",
+                            "host": ["{{base_url}}"],
+                            "path": ["api", "payments", "verify"]
+                        },
+                        "description": "Verify Stripe payment after user completes checkout. The session ID is sufficient for verification."
+                    },
+                    "response": []
+                }
+            ]
+        },
+        {
+            "name": "Razorpay Checkout",
+            "description": "Razorpay payment flow",
+            "item": [
+                {
+                    "name": "1. Initiate Razorpay Checkout",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{jwt_token}}"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"planId\": \"{{plan_id}}\",\n  \"provider\": \"razorpay\",\n  \"redirectUrl\": \"https://souli.app/payment-success\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/payments/checkout/initiate",
+                            "host": ["{{base_url}}"],
+                            "path": ["api", "payments", "checkout", "initiate"]
+                        },
+                        "description": "Create Razorpay order. Save response.data.session.sessionId as razorpay_order_id for verification."
+                    },
+                    "response": []
+                },
+                {
+                    "name": "2. Verify Razorpay Payment",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{jwt_token}}"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"provider\": \"razorpay\",\n  \"orderId\": \"{{razorpay_order_id}}\",\n  \"paymentId\": \"{{razorpay_payment_id}}\",\n  \"signature\": \"{{razorpay_signature}}\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/payments/verify",
+                            "host": ["{{base_url}}"],
+                            "path": ["api", "payments", "verify"]
+                        },
+                        "description": "Verify Razorpay payment after user completes checkout. Requires paymentId and signature from Razorpay response."
+                    },
+                    "response": []
+                }
+            ]
+        },
+        {
+            "name": "Subscription Management",
+            "description": "Check and manage active subscriptions",
+            "item": [
+                {
+                    "name": "Get Current Subscription Status",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{jwt_token}}"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/payments/subscription/status",
+                            "host": ["{{base_url}}"],
+                            "path": [
+                                "api",
+                                "payments",
+                                "subscription",
+                                "status"
+                            ]
+                        },
+                        "description": "Check if user has active subscription and days remaining until expiry."
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Get Subscription History",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{jwt_token}}"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/payments/subscription/history?page=1&pageSize=10",
+                            "host": ["{{base_url}}"],
+                            "path": [
+                                "api",
+                                "payments",
+                                "subscription",
+                                "history"
+                            ],
+                            "query": [
+                                {
+                                    "key": "page",
+                                    "value": "1"
+                                },
+                                {
+                                    "key": "pageSize",
+                                    "value": "10"
+                                }
+                            ]
+                        },
+                        "description": "Get complete subscription history with pagination. Save subscription ID as subscription_id if needed for cancellation."
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Cancel Active Subscription",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{jwt_token}}"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"subscriptionId\": \"{{subscription_id}}\",\n  \"cancelAtPeriodEnd\": false,\n  \"reason\": \"Too expensive\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/payments/subscription/cancel",
+                            "host": ["{{base_url}}"],
+                            "path": [
+                                "api",
+                                "payments",
+                                "subscription",
+                                "cancel"
+                            ]
+                        },
+                        "description": "Cancel active subscription immediately. Set cancelAtPeriodEnd to true to cancel at next renewal instead."
+                    },
+                    "response": []
+                }
+            ]
+        },
+        {
+            "name": "Payment History & Analytics",
+            "description": "View payment records and revenue statistics",
+            "item": [
+                {
+                    "name": "Get Payment History",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{jwt_token}}"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/payments/history?page=1&pageSize=10&status=SUCCESS",
+                            "host": ["{{base_url}}"],
+                            "path": ["api", "payments", "history"],
+                            "query": [
+                                {
+                                    "key": "page",
+                                    "value": "1"
+                                },
+                                {
+                                    "key": "pageSize",
+                                    "value": "10"
+                                },
+                                {
+                                    "key": "status",
+                                    "value": "SUCCESS",
+                                    "description": "Filter: PENDING, SUCCESS, FAILED, REFUNDED"
+                                }
+                            ]
+                        },
+                        "description": "Get all payments for user with pagination and status filtering. Useful for user to see their payment receipts."
+                    },
+                    "response": []
+                }
+            ]
+        },
+        {
+            "name": "Webhooks (For Testing)",
+            "description": "Test webhook endpoints with simulated events",
+            "item": [
+                {
+                    "name": "Test Stripe Webhook - Payment Succeeded",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"id\": \"evt_test_123\",\n  \"type\": \"charge.succeeded\",\n  \"data\": {\n    \"object\": {\n      \"id\": \"ch_test_1234567890\",\n      \"customer\": \"cus_test_provider_id\",\n      \"amount\": 999,\n      \"currency\": \"usd\",\n      \"status\": \"succeeded\"\n    }\n  }\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/webhooks/stripe",
+                            "host": ["{{base_url}}"],
+                            "path": ["webhooks", "stripe"]
+                        },
+                        "description": "Note: This is for testing only. Real webhooks require valid signatures."
+                    },
+                    "response": []
+                },
+                {
+                    "name": "Test Razorpay Webhook - Payment Authorized",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"event\": \"payment.authorized\",\n  \"payload\": {\n    \"payment\": {\n      \"entity\": {\n        \"id\": \"pay_test_1234567890\",\n        \"amount\": 99900,\n        \"currency\": \"INR\",\n        \"status\": \"authorized\",\n        \"order_id\": \"order_test_1234567890\"\n      }\n    }\n  }\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/webhooks/razorpay",
+                            "host": ["{{base_url}}"],
+                            "path": ["webhooks", "razorpay"]
+                        },
+                        "description": "Note: This is for testing only. Real webhooks require valid signatures."
+                    },
+                    "response": []
+                }
+            ]
+        },
+        {
+            "name": "Health Check",
+            "description": "Verify API is running",
+            "item": [
+                {
+                    "name": "Payment Service Health",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{jwt_token}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/payments/health",
+                            "host": ["{{base_url}}"],
+                            "path": ["api", "payments", "health"]
+                        },
+                        "description": "Quick health check to verify payment service is operational."
+                    },
+                    "response": []
+                }
+            ]
+        }
+    ],
+    "variable": [
+        {
+            "key": "base_url",
+            "value": "http://localhost:8000",
+            "type": "string",
+            "description": "Base API URL - change to production URL when deploying"
+        },
+        {
+            "key": "jwt_token",
+            "value": "",
+            "type": "string",
+            "description": "JWT token from login response - copy from auth/login endpoint"
+        },
+        {
+            "key": "plan_id",
+            "value": "",
+            "type": "string",
+            "description": "Plan UUID from GET /payments/plans response"
+        },
+        {
+            "key": "stripe_session_id",
+            "value": "",
+            "type": "string",
+            "description": "Session ID from Stripe checkout initiation"
+        },
+        {
+            "key": "razorpay_order_id",
+            "value": "",
+            "type": "string",
+            "description": "Order ID from Razorpay checkout initiation"
+        },
+        {
+            "key": "razorpay_payment_id",
+            "value": "",
+            "type": "string",
+            "description": "Payment ID from Razorpay payment response"
+        },
+        {
+            "key": "razorpay_signature",
+            "value": "",
+            "type": "string",
+            "description": "HMAC signature from Razorpay payment response"
+        },
+        {
+            "key": "subscription_id",
+            "value": "",
+            "type": "string",
+            "description": "Subscription UUID from subscription history"
+        }
+    ]
+}

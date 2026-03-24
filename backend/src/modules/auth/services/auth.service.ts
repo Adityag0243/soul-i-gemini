@@ -113,7 +113,7 @@ function toUserData(
     };
 }
 
-// Create user with role and keystore in a transaction
+// create user with role and keystore in a transaction
 
 async function createUserWithSession(
     userData: {

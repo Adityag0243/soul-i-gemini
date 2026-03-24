@@ -1,10 +1,10 @@
-import logger from './core/logger.js';
+import logger from './core/logger';
 import express from 'express';
 import cors from 'cors';
-import { isProduction, originUrl } from './config.js';
-import router from './routes/index.js';
-import { errorHandler } from './middlewares/error.middleware.js';
-import { NotFoundError } from './core/api-error.js';
+import { isProduction, originUrl } from './config';
+import router from './routes/index';
+import { errorHandler } from './middlewares/error.middleware';
+import { NotFoundError } from './core/api-error';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import swaggerUi from 'swagger-ui-express';
