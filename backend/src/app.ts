@@ -1,7 +1,7 @@
 import logger from './core/logger';
 import express from 'express';
 import cors from 'cors';
-import { isProduction, originUrl, serverUrl } from './config';
+import { isProduction, originUrl } from './config';
 import router from './routes/index';
 import { errorHandler } from './middlewares/error.middleware';
 import { NotFoundError } from './core/api-error';
@@ -16,8 +16,8 @@ process.on('uncaughtException', (e) => {
 
 export const app = express();
 
-// Adjust the size of response body as per requirement
 app.use(express.json({ limit: '10mb' }));
+
 app.use(
     express.urlencoded({
         limit: '10mb',
@@ -25,7 +25,8 @@ app.use(
         parameterLimit: 50000,
     }),
 );
-// Allows cross origin reference
+
+// allows cross origin reference
 app.use(
     cors({
         origin: originUrl,
@@ -34,7 +35,8 @@ app.use(
     }),
 );
 app.use(cookieParser());
-// Adds security header, express best security practice
+
+//security header
 app.use(helmet());
 
 if (!isProduction) {
@@ -51,7 +53,8 @@ if (!isProduction) {
         }),
     );
 }
-// Main routes
+
+// main routes
 app.use('/', router);
 
 app.use((_req, _res, next) => next(new NotFoundError()));

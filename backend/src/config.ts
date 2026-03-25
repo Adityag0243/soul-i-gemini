@@ -4,8 +4,7 @@ import fs from 'fs';
 import path from 'path';
 
 dotenv.config();
-
-/** Read a PEM key: prefer env var, fallback to keys/ file */
+//read the pem key: prefer env var, fallback to keys file
 function readKey(envVar: string, filename: string): string {
     const envValue = process.env[envVar];
     if (envValue) return envValue;
@@ -20,11 +19,11 @@ export const isProduction = process.env.NODE_ENV === 'production';
 export const timeZone = process.env.TZ;
 export const port = process.env.PORT;
 
-/** Base URL for the API (used by Swagger / Try it out). Must be http or https. */
+//the main serveing url : abhi deployed wala use mai hai
 export const serverUrl = process.env.SERVER_URL
     ? 'https://souli.onrender.com'
     : process.env.SERVER_URL;
-// JWT token configuration
+//token configuration
 export const tokenInfo = {
     accessTokenValidity: parseInt(
         process.env.ACCESS_TOKEN_VALIDITY_SEC || '900',
@@ -38,7 +37,7 @@ export const tokenInfo = {
     jwtPublicKey: readKey('JWT_PUBLIC_KEY', 'public.pem'),
 };
 
-// Cookie options
+// cookie options
 const cookieMaxAgeSeconds = Number(process.env.COOKIE_MAX_AGE_SEC ?? 3600000);
 const cookieDomain = process.env.COOKIE_DOMAIN;
 
@@ -46,7 +45,7 @@ export const cookieOptions: CookieOptions = {
     httpOnly: true,
     secure: isProduction,
     sameSite: isProduction ? ('none' as const) : ('strict' as const),
-    maxAge: cookieMaxAgeSeconds,
+    maxAge: cookieMaxAgeSeconds * 1000,
     domain: isProduction ? cookieDomain : undefined,
     path: '/',
 };
@@ -55,7 +54,7 @@ export const logDirectory = process.env.LOG_DIRECTORY;
 
 export const dbUrl = process.env.DATABASE_URL ?? '';
 
-// Google OAuth Configuration
+// google OAuth configuration
 export const googleConfig = {
     clientId: process.env.GOOGLE_CLIENT_ID || '',
     clientSecret: process.env.GOOGLE_CLIENT_SECRET || '',
@@ -110,7 +109,7 @@ export const paymentConfig = {
     ),
 };
 
-// Configure SES for export (backward compatibility)
+// configure SES for export (backward compatibility)
 export const configS3 = {
     awsRegion: process.env.AWS_REGION || 'ap-south-1',
     awsAccessKeyId: process.env.AWS_ACCESS_KEY_ID || '',
