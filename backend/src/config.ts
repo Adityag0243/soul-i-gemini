@@ -23,7 +23,7 @@ export const port = process.env.PORT;
 /** Base URL for the API (used by Swagger / Try it out). Must be http or https. */
 export const serverUrl =
     process.env.SERVER_URL ||
-    (port ? `http://localhost:${port}` : 'http://localhost:9090');
+    'https://souli.onrender.com';
 
 // JWT token configuration
 export const tokenInfo = {

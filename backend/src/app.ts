@@ -16,8 +16,6 @@ process.on('uncaughtException', (e) => {
 
 export const app = express();
 
-console.log(`Server URL: ${serverUrl}`);
-
 // Adjust the size of response body as per requirement
 app.use(express.json({ limit: '10mb' }));
 app.use(
