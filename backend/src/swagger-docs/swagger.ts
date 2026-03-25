@@ -4,9 +4,7 @@ import {
     OpenAPIRegistry,
     OpenApiGeneratorV3,
 } from '@asteasolutions/zod-to-openapi';
-// import { serverUrl } from '../config';
-
-const serverUrl = 'http://localhost:8000';
+import { serverUrl } from '../config';
 
 // Required: add .openapi() to Zod schemas before using registry.register()
 extendZodWithOpenApi(z);
@@ -41,7 +39,7 @@ export function generateOpenAPIDocument() {
         },
         servers: [
             {
-                url: serverUrl,
+                url: serverUrl || '',
                 description: 'API server',
             },
         ],
