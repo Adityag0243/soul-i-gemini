@@ -1,7 +1,7 @@
 import logger from './core/logger';
 import express from 'express';
 import cors from 'cors';
-import { isProduction, originUrl } from './config';
+import { isProduction, originUrl, serverUrl } from './config';
 import router from './routes/index';
 import { errorHandler } from './middlewares/error.middleware';
 import { NotFoundError } from './core/api-error';
@@ -15,6 +15,8 @@ process.on('uncaughtException', (e) => {
 });
 
 export const app = express();
+
+console.log(`Server URL: ${serverUrl}`);
 
 // Adjust the size of response body as per requirement
 app.use(express.json({ limit: '10mb' }));
