@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { registry } from '../../../docs/swagger';
+import { registry } from '../../../swagger-docs/swagger';
 
 // Email Registration Schema
 export const emailRegisterSchema = z.object({

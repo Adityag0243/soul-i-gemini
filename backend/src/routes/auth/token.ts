@@ -12,27 +12,27 @@ import KeystoreRepo from '../../database/repositories/keystore.repo';
 import { AuthFailureError } from '../../core/api-error';
 import crypto from 'crypto';
 import { TokenRefreshResponse } from '../../core/api-response';
-import { registry } from '../../docs/swagger';
+import { registry } from '../../swagger-docs/swagger';
 
 registry.registerPath({
-  method: 'post',
-  path: '/auth/token/refresh',
-  summary: 'Refresh tokens',
-  description:
-    'Issue new access and refresh tokens. Send refresh token in body (JSON) or in cookies. Requires API key and Bearer JWT (current access token).',
-  tags: ['Auth'],
-  security: [{ apiKey: [], bearerAuth: [] }],
-  responses: {
-    200: {
-      description: 'New tokens issued',
+    method: 'post',
+    path: '/auth/token/refresh',
+    summary: 'Refresh tokens',
+    description:
+        'Issue new access and refresh tokens. Send refresh token in body (JSON) or in cookies. Requires API key and Bearer JWT (current access token).',
+    tags: ['Auth'],
+    security: [{ apiKey: [], bearerAuth: [] }],
+    responses: {
+        200: {
+            description: 'New tokens issued',
+        },
+        401: {
+            description: 'Invalid or expired tokens',
+        },
+        403: {
+            description: 'Missing or invalid API key',
+        },
     },
-    401: {
-      description: 'Invalid or expired tokens',
-    },
-    403: {
-      description: 'Missing or invalid API key',
-    },
-  },
 });
 
 const router = Router();

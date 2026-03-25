@@ -8,7 +8,7 @@ import { NotFoundError } from './core/api-error';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import swaggerUi from 'swagger-ui-express';
-import { generateOpenAPIDocument } from './docs/swagger';
+import { generateOpenAPIDocument } from './swagger-docs/swagger';
 
 process.on('uncaughtException', (e) => {
     logger.error(e);

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { registry } from '../../../docs/swagger';
+import { registry } from '../../../swagger-docs/swagger';
 
 // create chat session schema
 export const createSessionSchema = z.object({

@@ -12,7 +12,7 @@ import { getUserData } from '../../core/utils';
 import { SuccessResponse } from '../../core/api-response';
 import { ValidationSource } from '../../helpers/validator';
 import { setCookies } from '../../core/cookie-utils';
-import { registry } from '../../docs/swagger';
+import { registry } from '../../swagger-docs/swagger';
 
 registry.registerPath({
     method: 'post',

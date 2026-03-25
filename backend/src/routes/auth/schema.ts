@@ -1,7 +1,7 @@
 import { Header } from './../../core/utils';
 import { ZodAuthBearer, ZodCookies } from './../../helpers/validator';
 import z from 'zod';
-import { registry } from '../../docs/swagger';
+import { registry } from '../../swagger-docs/swagger';
 
 const apiKey = z.object({
     [Header.API_KEY]: z.string(),

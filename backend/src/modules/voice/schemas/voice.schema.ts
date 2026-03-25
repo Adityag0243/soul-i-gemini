@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { registry } from '../../../docs/swagger';
+import { registry } from '../../../swagger-docs/swagger';
 
 export const createVoiceTokenSchema = z.object({
     roomName: z

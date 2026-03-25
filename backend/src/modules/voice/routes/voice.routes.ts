@@ -3,7 +3,7 @@ import { asyncHandler } from '../../../core/async-handler';
 import { validator } from '../../../middlewares/validator.middleware';
 import { ValidationSource } from '../../../helpers/validator';
 import authMiddleware from '../../../middlewares/auth.middleware';
-import { registry } from '../../../docs/swagger';
+import { registry } from '../../../swagger-docs/swagger';
 import {
     createVoiceTokenSchema,
     createVoiceBootstrapSchema,

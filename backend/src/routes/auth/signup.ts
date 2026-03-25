@@ -12,35 +12,36 @@ import { ValidationSource } from '../../helpers/validator';
 import bcryptjs from 'bcryptjs';
 import { RoleCode } from '@prisma/client';
 import { setCookies } from '../../core/cookie-utils';
-import { registry } from '../../docs/swagger';
+import { registry } from '../../swagger-docs/swagger';
 
 registry.registerPath({
-  method: 'post',
-  path: '/auth/signup',
-  summary: 'User Signup',
-  description: 'Register a new user. Returns user data and tokens. Requires API key.',
-  tags: ['Auth'],
-  security: [{ apiKey: [] }],
-  request: {
-    body: {
-      content: {
-        'application/json': {
-          schema: schema.signup,
+    method: 'post',
+    path: '/auth/signup',
+    summary: 'User Signup',
+    description:
+        'Register a new user. Returns user data and tokens. Requires API key.',
+    tags: ['Auth'],
+    security: [{ apiKey: [] }],
+    request: {
+        body: {
+            content: {
+                'application/json': {
+                    schema: schema.signup,
+                },
+            },
         },
-      },
     },
-  },
-  responses: {
-    201: {
-      description: 'User created successfully',
+    responses: {
+        201: {
+            description: 'User created successfully',
+        },
+        400: {
+            description: 'Validation error or user already registered',
+        },
+        403: {
+            description: 'Missing or invalid API key',
+        },
     },
-    400: {
-      description: 'Validation error or user already registered',
-    },
-    403: {
-      description: 'Missing or invalid API key',
-    },
-  },
 });
 
 const router = Router();
