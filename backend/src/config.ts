@@ -21,10 +21,9 @@ export const timeZone = process.env.TZ;
 export const port = process.env.PORT;
 
 /** Base URL for the API (used by Swagger / Try it out). Must be http or https. */
-export const serverUrl =
-    process.env.SERVER_URL ||
-    'https://souli.onrender.com';
-
+export const serverUrl = process.env.SERVER_URL
+    ? 'https://souli.onrender.com'
+    : process.env.SERVER_URL;
 // JWT token configuration
 export const tokenInfo = {
     accessTokenValidity: parseInt(
