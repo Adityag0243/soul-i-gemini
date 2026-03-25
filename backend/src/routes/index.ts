@@ -11,6 +11,10 @@ import { Permission } from '@prisma/client';
 
 const router = Router();
 
+router.get('/', (_req, res) => {
+    res.json({ message: 'Souli API is running', success: true });
+});
+
 router.use('/health', healthRoutes);
 
 router.use(apiKeyMiddleware);
