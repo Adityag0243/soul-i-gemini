@@ -75,8 +75,8 @@ export const resumeSubscriptionSchema = z.object({
 export type ResumeSubscriptionInput = z.infer<typeof resumeSubscriptionSchema>;
 
 export const getSubscriptionHistorySchema = z.object({
-    page: z.number().min(1).default(1).optional(),
-    pageSize: z.number().min(1).max(100).default(10).optional(),
+    page: z.coerce.number().min(1).default(1),
+    pageSize: z.coerce.number().min(1).max(100).default(10),
 });
 
 export type GetSubscriptionHistoryInput = z.infer<
@@ -84,8 +84,8 @@ export type GetSubscriptionHistoryInput = z.infer<
 >;
 
 export const getPaymentHistorySchema = z.object({
-    page: z.number().min(1).default(1).optional(),
-    pageSize: z.number().min(1).max(100).default(10).optional(),
+    page: z.coerce.number().min(1).default(1),
+    pageSize: z.coerce.number().min(1).max(100).default(10),
     status: z.enum(['PENDING', 'SUCCESS', 'FAILED', 'REFUNDED']).optional(),
 });
 

@@ -40,7 +40,12 @@ class SESMailClient {
         return this.instance;
     }
 
-    async sendEmail(params: SendEmailCommandInput, email: string) {
+    private async sendEmail(options: {
+        to: string;
+        subject: string;
+        htmlContent: string;
+        textContent?: string;
+    }) {
         if (!this.sesClient) {
             logger.error('SES is not initialised, retrying..');
             this.initialiseSes();
@@ -54,11 +59,42 @@ class SESMailClient {
         }
 
         try {
-            const command = new SendEmailCommand(params);
+            const command = new SendEmailCommand({
+                Source: `${process.env.FROM_NAME || 'Souli'} <${process.env.FROM_EMAIL || 'noreply@souli.com'}>`,
+                Destination: {
+                    ToAddresses: [options.to],
+                },
+                Message: {
+                    Subject: {
+                        Data: options.subject,
+                        Charset: 'UTF-8',
+                    },
+                    Body: {
+                        Html: {
+                            Data: options.htmlContent,
+                            Charset: 'UTF-8',
+                        },
+                        ...(options.textContent
+                            ? {
+                                  Text: {
+                                      Data: options.textContent,
+                                      Charset: 'UTF-8',
+                                  },
+                              }
+                            : {}),
+                    },
+                },
+            } as SendEmailCommandInput);
             await this.sesClient.send(command);
-            console.log(`Verification email sent to ${email}`);
+            logger.info('Email sent successfully', {
+                to: options.to,
+                subject: options.subject,
+            });
         } catch (error) {
-            console.error('Error sending email:', error);
+            logger.error('Error sending email', {
+                error: error instanceof Error ? error.message : 'Unknown error',
+                to: options.to,
+            });
             throw new Error('Failed to send verification email');
         }
     }

@@ -28,6 +28,7 @@ enum TokenType {
   ACCESS
   REFRESH
   MAGIC_LINK
+  RESET_PASSWORD
 }
 
 enum MessageRole {

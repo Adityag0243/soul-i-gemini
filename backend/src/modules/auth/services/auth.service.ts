@@ -11,7 +11,9 @@ import {
 } from '../../../core/api-error';
 import { createTokens } from '../../../core/auth-utils';
 import AuthIdentityRepo from '../repositories/auth-identity.repo';
+import AuthTokenRepo from '../repositories/auth-token.repo';
 import logger from '../../../core/logger';
+import { passwordResetEmailService } from '../../../infrastructure/email/password-reset-email.service';
 import {
     AuthResponseDto,
     AnonymousAuthResponseDto,
@@ -24,14 +26,18 @@ import {
     GoogleLoginInput,
     AnonymousLoginInput,
     SouliKeyRestoreInput,
+    ForgotPasswordRequestInput,
+    ForgotPasswordVerifyInput,
+    ForgotPasswordResetInput,
 } from '../schemas/auth.schema';
+import { TokenType } from '@prisma/client';
 
 // Google OAuth client
 const googleClient = new OAuth2Client(googleConfig.clientId);
 
-// Generate a random Souli Key (16 characters for secure anonymous access)
+// Generate a random Souli Key (12 characters for anonymous access)
 function generateSouliKey(): string {
-    return crypto.randomBytes(24).toString('base64url').slice(0, 24);
+    return crypto.randomBytes(24).toString('base64url').slice(0, 12);
 }
 
 // Generate access and refresh token keys
@@ -65,6 +71,40 @@ async function verifyPassword(
     } catch {
         return false;
     }
+}
+
+const PASSWORD_RESET_OTP_EXPIRY_MINUTES = 10;
+const PASSWORD_RESET_SESSION_EXPIRY_MINUTES = 15;
+const PASSWORD_RESET_SECRET =
+    process.env.PASSWORD_RESET_SECRET ||
+    process.env.JWT_PRIVATE_KEY ||
+    'souli-password-reset';
+
+function normalizeEmail(email: string): string {
+    return email.trim().toLowerCase();
+}
+
+function hashResetToken(value: string): string {
+    return crypto
+        .createHash('sha256')
+        .update(`${PASSWORD_RESET_SECRET}:${value}`)
+        .digest('hex');
+}
+
+function hashResetOtp(userId: number, email: string, otp: string): string {
+    return hashResetToken(`otp:${userId}:${normalizeEmail(email)}:${otp}`);
+}
+
+function hashResetSessionToken(resetToken: string): string {
+    return hashResetToken(`session:${resetToken}`);
+}
+
+function generateResetOtp(): string {
+    return crypto.randomInt(100000, 1000000).toString();
+}
+
+function generateResetSessionToken(): string {
+    return crypto.randomBytes(32).toString('base64url');
 }
 
 // verify google id token and extract user info
@@ -223,14 +263,24 @@ export async function registerWithEmail(
     input: EmailRegisterInput,
 ): Promise<AuthResponseDto> {
     const { name, email, password } = input;
+    const normalizedEmail = normalizeEmail(email);
 
     const existingIdentity = await AuthIdentityRepo.findByProviderAndEmail(
         AuthProvider.EMAIL,
-        email,
+        normalizedEmail,
     );
     if (existingIdentity) {
         throw new BadRequestError('User already registered with this email');
     }
+
+    const existingUser = await prisma.user.findUnique({
+        where: { email: normalizedEmail },
+    });
+
+    if (existingUser) {
+        throw new BadRequestError('User already registered with this email');
+    }
+
     // Hash password
     const passwordHash = await hashPassword(password);
     // Create user with session
@@ -244,7 +294,7 @@ export async function registerWithEmail(
     await AuthIdentityRepo.create({
         userId: user.id,
         provider: AuthProvider.EMAIL,
-        email,
+        email: normalizedEmail,
         passwordHash,
         emailVerified: false,
     });
@@ -268,11 +318,12 @@ export async function loginWithEmail(
     input: EmailLoginInput,
 ): Promise<AuthResponseDto> {
     const { email, password } = input;
+    const normalizedEmail = normalizeEmail(email);
 
     // find auth identity
     const identity = await AuthIdentityRepo.findByProviderAndEmail(
         AuthProvider.EMAIL,
-        email,
+        normalizedEmail,
     );
 
     if (!identity || !identity.passwordHash) {
@@ -435,6 +486,187 @@ export async function loginAnonymous(
     };
 }
 
+export async function requestPasswordResetOtp(
+    input: ForgotPasswordRequestInput,
+): Promise<{ message: string }> {
+    const normalizedEmail = normalizeEmail(input.email);
+    const identity = await AuthIdentityRepo.findByProviderAndEmail(
+        AuthProvider.EMAIL,
+        normalizedEmail,
+    );
+
+    if (!identity || !identity.passwordHash) {
+        logger.info(
+            'Password reset requested for unknown or unsupported email',
+            {
+                email: normalizedEmail,
+            },
+        );
+
+        return {
+            message:
+                'If the email exists in our system, a password reset OTP has been sent.',
+        };
+    }
+
+    const user = await prisma.user.findUnique({
+        where: { id: identity.userId },
+    });
+
+    if (!user) {
+        return {
+            message:
+                'If the email exists in our system, a password reset OTP has been sent.',
+        };
+    }
+
+    await AuthTokenRepo.revokeByUserAndType(user.id, TokenType.RESET_PASSWORD);
+
+    const otp = generateResetOtp();
+    const tokenHash = hashResetOtp(user.id, normalizedEmail, otp);
+    const expiresAt = new Date(
+        Date.now() + PASSWORD_RESET_OTP_EXPIRY_MINUTES * 60 * 1000,
+    );
+
+    await AuthTokenRepo.create({
+        userId: user.id,
+        tokenHash,
+        tokenType: TokenType.RESET_PASSWORD,
+        expiresAt,
+    });
+
+    await passwordResetEmailService.sendPasswordResetOtp({
+        email: normalizedEmail,
+        name: user.name || normalizedEmail,
+        otp,
+        expiryMinutes: PASSWORD_RESET_OTP_EXPIRY_MINUTES,
+    });
+
+    return {
+        message:
+            'If the email exists in our system, a password reset OTP has been sent.',
+    };
+}
+
+export async function verifyPasswordResetOtp(
+    input: ForgotPasswordVerifyInput,
+): Promise<{ resetToken: string; expiresInSeconds: number }> {
+    const normalizedEmail = normalizeEmail(input.email);
+    const identity = await AuthIdentityRepo.findByProviderAndEmail(
+        AuthProvider.EMAIL,
+        normalizedEmail,
+    );
+
+    if (!identity || !identity.passwordHash) {
+        throw new AuthFailureError('Invalid or expired OTP');
+    }
+
+    const activeToken = await AuthTokenRepo.findActiveByUserAndType(
+        identity.userId,
+        TokenType.RESET_PASSWORD,
+    );
+
+    if (!activeToken) {
+        throw new AuthFailureError('Invalid or expired OTP');
+    }
+
+    const expectedHash = hashResetOtp(
+        identity.userId,
+        normalizedEmail,
+        input.otp,
+    );
+
+    if (activeToken.tokenHash !== expectedHash) {
+        throw new AuthFailureError('Invalid or expired OTP');
+    }
+
+    await AuthTokenRepo.revokeByHash(activeToken.tokenHash);
+
+    const resetToken = generateResetSessionToken();
+    const resetTokenHash = hashResetSessionToken(resetToken);
+    const expiresAt = new Date(
+        Date.now() + PASSWORD_RESET_SESSION_EXPIRY_MINUTES * 60 * 1000,
+    );
+
+    await AuthTokenRepo.create({
+        userId: identity.userId,
+        tokenHash: resetTokenHash,
+        tokenType: TokenType.RESET_PASSWORD,
+        expiresAt,
+    });
+
+    return {
+        resetToken,
+        expiresInSeconds: PASSWORD_RESET_SESSION_EXPIRY_MINUTES * 60,
+    };
+}
+
+export async function resetPassword(
+    input: ForgotPasswordResetInput,
+): Promise<{ message: string }> {
+    const resetTokenHash = hashResetSessionToken(input.resetToken);
+    const resetSession = await AuthTokenRepo.findActiveByHash(
+        TokenType.RESET_PASSWORD,
+        resetTokenHash,
+    );
+
+    if (!resetSession) {
+        throw new AuthFailureError('Invalid or expired reset token');
+    }
+
+    const user = await prisma.user.findUnique({
+        where: { id: resetSession.userId },
+    });
+
+    if (!user) {
+        throw new AuthFailureError('Invalid or expired reset token');
+    }
+
+    const identity = await AuthIdentityRepo.findByProviderAndEmail(
+        AuthProvider.EMAIL,
+        normalizeEmail(user.email || ''),
+    );
+
+    if (!identity || !identity.passwordHash) {
+        throw new AuthFailureError(
+            'Password login not available for this account',
+        );
+    }
+
+    const newPasswordHash = await hashPassword(input.newPassword);
+
+    await prisma.$transaction(async (tx) => {
+        await tx.authIdentity.update({
+            where: { id: identity.id },
+            data: { passwordHash: newPasswordHash },
+        });
+
+        await tx.user.update({
+            where: { id: user.id },
+            data: { password: newPasswordHash },
+        });
+
+        await tx.keystore.deleteMany({
+            where: { clientId: user.id },
+        });
+
+        await tx.authToken.updateMany({
+            where: {
+                userId: user.id,
+                tokenType: TokenType.RESET_PASSWORD,
+            },
+            data: {
+                revoked: true,
+            },
+        });
+    });
+
+    return {
+        message:
+            'Password reset successfully. Please sign in with your new password.',
+    };
+}
+
 /**
  * Restore anonymous session using Souli Key
  */
@@ -573,6 +805,9 @@ export default {
     loginWithEmail,
     loginWithGoogle,
     loginAnonymous,
+    requestPasswordResetOtp,
+    verifyPasswordResetOtp,
+    resetPassword,
     restoreWithSouliKey,
     linkGoogleAccount,
     getLinkedProviders,

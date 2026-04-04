@@ -10,6 +10,9 @@ import {
     googleLoginSchema,
     anonymousLoginSchema,
     souliKeyRestoreSchema,
+    forgotPasswordRequestSchema,
+    forgotPasswordVerifySchema,
+    forgotPasswordResetSchema,
 } from '../schemas/auth.schema';
 import * as AuthController from '../controllers/auth.controller';
 
@@ -168,6 +171,80 @@ registry.registerPath({
     },
 });
 
+registry.registerPath({
+    method: 'post',
+    path: '/auth/password/forgot',
+    summary: 'Request Forgot Password OTP',
+    description:
+        'Send a 6 digit OTP to the user email for password reset. Returns a generic success response.',
+    tags: ['Auth'],
+    security: [{ apiKey: [] }],
+    request: {
+        body: {
+            content: {
+                'application/json': {
+                    schema: forgotPasswordRequestSchema,
+                },
+            },
+        },
+    },
+    responses: {
+        200: { description: 'OTP sent successfully' },
+        400: { description: 'Validation error' },
+        403: { description: 'Missing or invalid API key' },
+    },
+});
+
+registry.registerPath({
+    method: 'post',
+    path: '/auth/password/forgot/verify',
+    summary: 'Verify Forgot Password OTP',
+    description:
+        'Verify the OTP sent to email and return a short-lived reset token used to complete the password change.',
+    tags: ['Auth'],
+    security: [{ apiKey: [] }],
+    request: {
+        body: {
+            content: {
+                'application/json': {
+                    schema: forgotPasswordVerifySchema,
+                },
+            },
+        },
+    },
+    responses: {
+        200: { description: 'OTP verified successfully' },
+        400: { description: 'Validation error' },
+        401: { description: 'Invalid or expired OTP' },
+        403: { description: 'Missing or invalid API key' },
+    },
+});
+
+registry.registerPath({
+    method: 'post',
+    path: '/auth/password/forgot/reset',
+    summary: 'Reset Password',
+    description:
+        'Set a new password after OTP verification using the reset token returned by the verify step.',
+    tags: ['Auth'],
+    security: [{ apiKey: [] }],
+    request: {
+        body: {
+            content: {
+                'application/json': {
+                    schema: forgotPasswordResetSchema,
+                },
+            },
+        },
+    },
+    responses: {
+        200: { description: 'Password reset successfully' },
+        400: { description: 'Validation error' },
+        401: { description: 'Invalid or expired reset token' },
+        403: { description: 'Missing or invalid API key' },
+    },
+});
+
 // routes
 
 //register
@@ -217,6 +294,24 @@ router.get(
     '/providers',
     authMiddleware as unknown as RequestHandler,
     asyncHandler(AuthController.getProviders),
+);
+
+router.post(
+    '/password/forgot',
+    validator(forgotPasswordRequestSchema, ValidationSource.BODY),
+    asyncHandler(AuthController.requestForgotPasswordOtp),
+);
+
+router.post(
+    '/password/forgot/verify',
+    validator(forgotPasswordVerifySchema, ValidationSource.BODY),
+    asyncHandler(AuthController.verifyForgotPasswordOtp),
+);
+
+router.post(
+    '/password/forgot/reset',
+    validator(forgotPasswordResetSchema, ValidationSource.BODY),
+    asyncHandler(AuthController.resetForgotPassword),
 );
 
 export default router;

@@ -23,6 +23,11 @@ export async function handleStripeWebhook(
     try {
         const sig = req.headers['stripe-signature'] as string;
 
+        if (!sig) {
+            res.status(400).json({ error: 'Missing stripe-signature header' });
+            return;
+        }
+
         // Verify webhook signature
         const event = stripeGateway.verifyWebhookSignature(req.body, sig);
 
@@ -201,10 +206,25 @@ export async function handleRazorpayWebhook(
 ): Promise<void> {
     try {
         const signature = req.headers['x-razorpay-signature'] as string;
-        const body = JSON.stringify(req.body);
+
+        if (!signature) {
+            res.status(400).json({
+                error: 'Missing x-razorpay-signature header',
+            });
+            return;
+        }
+
+        const rawBody = Buffer.isBuffer(req.body)
+            ? req.body.toString('utf8')
+            : typeof req.body === 'string'
+              ? req.body
+              : JSON.stringify(req.body);
 
         // Verify webhook signature
-        const isValid = razorpayGateway.verifyWebhookSignature(body, signature);
+        const isValid = razorpayGateway.verifyWebhookSignature(
+            rawBody,
+            signature,
+        );
 
         if (!isValid) {
             logger.warn('Invalid Razorpay webhook signature');
@@ -212,8 +232,14 @@ export async function handleRazorpayWebhook(
             return;
         }
 
-        const event = req.body.event;
-        const payload = req.body.payload;
+        const parsedBody = Buffer.isBuffer(req.body)
+            ? JSON.parse(req.body.toString('utf8'))
+            : typeof req.body === 'string'
+              ? JSON.parse(req.body)
+              : req.body;
+
+        const event = parsedBody.event;
+        const payload = parsedBody.payload;
 
         logger.info('Razorpay webhook received', {
             eventType: event,

@@ -9,12 +9,26 @@ import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import swaggerUi from 'swagger-ui-express';
 import { generateOpenAPIDocument } from './swagger-docs/swagger';
+import { handleStripeWebhook, handleRazorpayWebhook } from './modules/payments';
 
 process.on('uncaughtException', (e) => {
     logger.error(e);
 });
 
 export const app = express();
+
+// Webhooks must use raw body for signature verification and bypass API key/auth middleware.
+app.post(
+    '/webhooks/stripe',
+    express.raw({ type: 'application/json' }),
+    handleStripeWebhook,
+);
+
+app.post(
+    '/webhooks/razorpay',
+    express.raw({ type: 'application/json' }),
+    handleRazorpayWebhook,
+);
 
 app.use(express.json({ limit: '10mb' }));
 

@@ -31,6 +31,12 @@ async function remove(id: number): Promise<void> {
     });
 }
 
+async function removeByClientId(clientId: number): Promise<void> {
+    await prisma.keystore.deleteMany({
+        where: { clientId },
+    });
+}
+
 async function findForKey(
     clientId: number,
     key: string,
@@ -85,6 +91,7 @@ async function find(
 export default {
     create,
     remove,
+    removeByClientId,
     findForKey,
     find,
 };

@@ -12,6 +12,9 @@ import {
     GoogleLoginInput,
     AnonymousLoginInput,
     SouliKeyRestoreInput,
+    ForgotPasswordRequestInput,
+    ForgotPasswordVerifyInput,
+    ForgotPasswordResetInput,
 } from '../schemas/auth.schema';
 
 //register with email and password
@@ -128,4 +131,40 @@ export async function getProviders(
     const result = await AuthService.getLinkedProviders(req.user.id);
 
     new SuccessResponse('Providers retrieved', result).send(res);
+}
+
+// request password reset OTP
+// POST /auth/password/forgot
+
+export async function requestForgotPasswordOtp(
+    req: Request<object, object, ForgotPasswordRequestInput>,
+    res: Response,
+): Promise<void> {
+    const result = await AuthService.requestPasswordResetOtp(req.body);
+
+    new SuccessResponse(result.message, result).send(res);
+}
+
+// verify password reset OTP
+// POST /auth/password/forgot/verify
+
+export async function verifyForgotPasswordOtp(
+    req: Request<object, object, ForgotPasswordVerifyInput>,
+    res: Response,
+): Promise<void> {
+    const result = await AuthService.verifyPasswordResetOtp(req.body);
+
+    new SuccessResponse('OTP verified successfully', result).send(res);
+}
+
+// reset password after OTP verification
+// POST /auth/password/forgot/reset
+
+export async function resetForgotPassword(
+    req: Request<object, object, ForgotPasswordResetInput>,
+    res: Response,
+): Promise<void> {
+    const result = await AuthService.resetPassword(req.body);
+
+    new SuccessResponse(result.message, null).send(res);
 }
