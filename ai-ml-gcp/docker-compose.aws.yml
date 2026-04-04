@@ -1,15 +1,15 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Souli — GCP Docker Compose (runs on a GCE VM with NVIDIA GPU)
+# Souli — AWS Docker Compose (runs on EC2 instance with NVIDIA GPU)
 #
 # Services:
 #   ollama      — Ollama LLM server (llama3.1 + qwen2.5:1.5b)
 #   qdrant      — Qdrant vector store
 #   souli       — Streamlit UI (port 8501)
-#   souli-api   — FastAPI REST API for mobile app (port 8000)  ← NEW
+#   souli-api   — FastAPI REST API for mobile app (port 8000)
 #   livekit     — LiveKit SFU for voice rooms (optional)
 #
-# Usage on GCE VM:
-#   docker compose -f docker-compose.gcp.yml --env-file .env up -d
+# Usage on EC2 VM:
+#   docker compose -f docker-compose.aws.yml --env-file .env up -d
 # ─────────────────────────────────────────────────────────────────────────────
 
 version: "3.9"
@@ -39,7 +39,7 @@ x-souli-env: &souli-env
   LIVEKIT_ROOM: ${LIVEKIT_ROOM:-souli-room}
   SOULI_OUTPUTS_DIR: /app/outputs
   SOULI_LOG_LEVEL: ${SOULI_LOG_LEVEL:-INFO}
-  SOULI_CONFIG_PATH: /app/configs/pipeline.gcp.yaml
+  SOULI_CONFIG_PATH: /app/configs/pipeline.aws.yaml
 
 x-souli-volumes: &souli-volumes
   - souli-data:/app/data
@@ -100,7 +100,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: souli-pipeline
+    container_name: souli-ui
     restart: unless-stopped
     networks:
       - souli-net
@@ -110,29 +110,15 @@ services:
       qdrant:
         condition: service_healthy
     volumes: *souli-volumes
-    environment:
-      <<: *souli-env
-    # ← This line tells Docker what to RUN for this service
-    # command: [ "streamlit", "run", "/app/souli_pipeline/streamlit_app.py", "--server.port=8501", "--server.address=0.0.0.0" ]
-    command: [ "streamlit", "run", "/app/app.py", "--server.port=8501", "--server.address=0.0.0.0" ]
     ports:
       - "8501:8501"
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [ gpu ]
-    healthcheck:
-      test: [ "CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/8501' || exit 1" ]
-      interval: 60s
-      timeout: 30s
-      retries: 3
-      start_period: 30s
+    environment:
+      <<: *souli-env
+      STREAMLIT_SERVER_HEADLESS: "true"
+      STREAMLIT_SERVER_PORT: 8501
+      STREAMLIT_SERVER_ADDRESS: 0.0.0.0
 
-  # ── Souli FastAPI — REST API for mobile app (port 8000) ───────────────────
-  # THIS IS THE NEW SERVICE your mobile backend team connects to
+  # ── Souli FastAPI (port 8000) ──────────────────────────────────────────────
   souli-api:
     build:
       context: .
@@ -147,66 +133,16 @@ services:
       qdrant:
         condition: service_healthy
     volumes: *souli-volumes
+    ports:
+      - "8000:8000"
     environment:
       <<: *souli-env
-    command: [ "gunicorn", "souli_pipeline.api:app", "--worker-class", "uvicorn.workers.UvicornWorker", "--workers", "3", "--bind", "0.0.0.0:8000", "--timeout", "120" ]
-    ports:
-      - "8000:8000" # Mobile app calls http://<VM_IP>:8000
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [ gpu ]
-    healthcheck:
-      test: [ "CMD-SHELL", "curl -f http://localhost:8000/health || exit 1" ]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
-
-  souli-dev:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: souli-dev-ui
-    restart: unless-stopped
-    networks:
-      - souli-net
-    depends_on:
-      ollama:
-        condition: service_healthy
-      qdrant:
-        condition: service_healthy
-    volumes:
-      - souli-data:/app/data
-      - souli-outputs:/app/outputs
-    environment:
-      - OLLAMA_ENDPOINT=http://ollama:11434
-      - QDRANT_HOST=qdrant
-      - QDRANT_PORT=6333
-      - QDRANT_COLLECTION=${QDRANT_COLLECTION:-souli_chunks}
-      - SOULI_LOG_LEVEL=DEBUG
-    command: [ "streamlit", "run", "/app/souli_pipeline/streamlit_dev.py", "--server.port=8502", "--server.address=0.0.0.0" ]
-    ports:
-      - "8502:8502"
-
-  # ── LiveKit SFU (self-hosted, optional) ───────────────────────────────────
-  livekit:
-    image: livekit/livekit-server:latest
-    container_name: souli-livekit
-    restart: unless-stopped
-    networks:
-      - souli-net
-    ports:
-      - "7880:7880"
-      - "7881:7881"
-      - "50100-50200:50100-50200/udp"
-    environment:
-      - LIVEKIT_CONFIG_BODY=${LIVEKIT_CONFIG_BODY}
-    volumes:
-      - ./configs/livekit.yaml:/etc/livekit.yaml:ro
-    command: [ "--config", "/etc/livekit.yaml" ]
-    profiles:
-      - livekit-selfhosted
+      SOULI_LOG_LEVEL: INFO
+    command: >
+      gunicorn souli_pipeline.api:app
+      --workers 2
+      --worker-class uvicorn.workers.UvicornWorker
+      --bind 0.0.0.0:8000
+      --timeout 300
+      --access-logfile -
+      --error-logfile -
