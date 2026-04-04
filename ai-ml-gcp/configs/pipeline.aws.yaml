@@ -1,12 +1,12 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Souli Pipeline — GCP / Docker Compose config
+# Souli Pipeline — AWS / Docker Compose config
 #
-# Service hostnames match docker-compose.gcp.yml service names.
+# Service hostnames match docker-compose.aws.yml service names.
 # Sensitive values (API keys, secrets) come from .env — never hardcode them.
 # ─────────────────────────────────────────────────────────────────────────────
 
 run:
-  outputs_dir: /app/outputs   # bind-mounted persistent disk on GCE
+  outputs_dir: /app/outputs   # bind-mounted EBS volume on EC2
   max_workers: 4
 
 energy:
@@ -105,7 +105,7 @@ conversation:
   max_intake_turns: 4
   temperature: 0.75
 
-# Voice pipeline — LiveKit Cloud (free tier) or self-hosted on GCE
+# Voice pipeline — LiveKit Cloud (free tier) or self-hosted on EC2
 # Values injected from .env via env vars: LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET
 voice:
   livekit_url: "wss://YOUR_PROJECT.livekit.cloud"   # overridden by LIVEKIT_URL env var
