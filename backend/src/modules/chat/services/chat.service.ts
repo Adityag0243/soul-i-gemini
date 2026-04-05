@@ -282,6 +282,11 @@ export async function sendMessage(
         assistantMessage: toMessageDto(assistantMessage),
         detectedEmotion: aiResponse.detectedEmotion,
         crisisLevel: aiResponse.crisisLevel,
+        phase: aiResponse.phase,
+        energyNode: aiResponse.energyNode,
+        turnCount: aiResponse.turnCount,
+        energy_node: aiResponse.energyNode,
+        turn_count: aiResponse.turnCount,
     };
 }
 

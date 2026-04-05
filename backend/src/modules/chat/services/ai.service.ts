@@ -55,6 +55,9 @@ export interface AIResponse {
     tokenCount?: number;
     crisisLevel: CrisisLevel;
     detectedEmotion?: string;
+    phase?: string;
+    energyNode?: string | null;
+    turnCount?: number;
 }
 
 // system prompt for Souli AI - emotional wellness companion
@@ -465,6 +468,9 @@ export async function generateResponse(
             content: response.reply,
             crisisLevel,
             detectedEmotion,
+            phase: response.phase,
+            energyNode: response.energy_node,
+            turnCount: response.turn_count,
         };
     } catch (error) {
         if (!shouldTryOllamaCompatibilityFallback()) {

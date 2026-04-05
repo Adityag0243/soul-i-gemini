@@ -26,6 +26,12 @@ export interface SendMessageResponseDto {
     assistantMessage: ChatMessageDto;
     detectedEmotion?: string;
     crisisLevel: CrisisLevel;
+    phase?: string;
+    energyNode?: string | null;
+    turnCount?: number;
+    // snake_case aliases to mirror AI service response fields
+    energy_node?: string | null;
+    turn_count?: number;
 }
 
 export interface SaveVoiceTranscriptResponseDto {
