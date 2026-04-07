@@ -37,7 +37,7 @@ const googleClient = new OAuth2Client(googleConfig.clientId);
 
 // Generate a random Souli Key (12 characters for anonymous access)
 function generateSouliKey(): string {
-    return crypto.randomBytes(24).toString('base64url').slice(0, 12);
+    return crypto.randomBytes(24).toString('base64url').slice(0, 6);
 }
 
 // Generate access and refresh token keys

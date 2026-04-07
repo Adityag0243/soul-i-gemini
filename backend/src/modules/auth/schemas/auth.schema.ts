@@ -35,7 +35,7 @@ export const anonymousLoginSchema = z.object({
 
 // Souli Key Restore Schema (for anonymous users to restore their session)
 export const souliKeyRestoreSchema = z.object({
-    souliKey: z.string().length(12, 'Souli key must be exactly 12 characters'),
+    souliKey: z.string().length(6, 'Souli key must be exactly 6 characters'),
 });
 
 // Link Provider Schema
