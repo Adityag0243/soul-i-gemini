@@ -2,7 +2,6 @@ import { Router, RequestHandler } from 'express';
 import healthRoutes from './health/index';
 import { apiKeyMiddleware } from './auth/api-key';
 import permission from '../middlewares/permission.middleware';
-// import authRoutes from './auth';
 import { authRoutes as authModuleRoutes } from '../modules/auth';
 import { chatRoutes } from '../modules/chat';
 import { voiceRoutes } from '../modules/voice';
