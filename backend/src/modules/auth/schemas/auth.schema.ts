@@ -10,14 +10,16 @@ const passwordSchema = z
         'Password must contain at least one uppercase letter, one lowercase letter, and one number',
     );
 
-// Email Registration Schema
+const SOULI_KEY_LENGTH = 6;
+
+// email registration schema
 export const emailRegisterSchema = z.object({
     name: z.string().min(1, 'Name is required').max(255),
     email: z.string().email('Invalid email format'),
     password: passwordSchema,
 });
 
-// Email Login Schema
+// email Login Schema
 export const emailLoginSchema = z.object({
     email: z.string().email('Invalid email format'),
     password: z.string().min(1, 'Password is required'),
@@ -33,16 +35,35 @@ export const anonymousLoginSchema = z.object({
     name: z.string().max(255).optional(),
 });
 
-// Souli Key Restore Schema (for anonymous users to restore their session)
+// Souli Key Restore Schema
 export const souliKeyRestoreSchema = z.object({
-    souliKey: z.string().length(6, 'Souli key must be exactly 6 characters'),
+    souliKey: z
+        .union([
+            z
+                .string()
+                .length(
+                    SOULI_KEY_LENGTH,
+                    'Souli key must be exactly 6 characters',
+                ),
+        ])
+        .describe('Souli key generated during anonymous login'),
+});
+
+// Reset Journey Schema
+export const resetJourneySchema = z.object({
+    confirm: z.literal('RESET_JOURNEY'),
+});
+
+// Erase All Data Schema
+export const eraseAllDataSchema = z.object({
+    confirm: z.literal('ERASE_ALL_DATA'),
 });
 
 // Link Provider Schema
 export const linkProviderSchema = z.object({
     provider: z.enum(['GOOGLE', 'EMAIL']),
-    idToken: z.string().optional(), // For Google
-    email: z.string().email().optional(), // For Email
+    idToken: z.string().optional(), // for Google
+    email: z.string().email().optional(), // for Email
     password: z.string().min(8).optional(), // For Email
 });
 
@@ -66,7 +87,7 @@ export const forgotPasswordResetSchema = z
         path: ['confirmPassword'],
     });
 
-// Refresh Token Schema
+// refresh Token Schema
 export const refreshTokenSchema = z
     .object({
         body: z
@@ -88,12 +109,14 @@ export const refreshTokenSchema = z
         },
     );
 
-// Register schemas with OpenAPI registry
+// register schemas with OpenAPI registry
 registry.register('EmailRegisterSchema', emailRegisterSchema);
 registry.register('EmailLoginSchema', emailLoginSchema);
 registry.register('GoogleLoginSchema', googleLoginSchema);
 registry.register('AnonymousLoginSchema', anonymousLoginSchema);
 registry.register('SouliKeyRestoreSchema', souliKeyRestoreSchema);
+registry.register('ResetJourneySchema', resetJourneySchema);
+registry.register('EraseAllDataSchema', eraseAllDataSchema);
 registry.register('ForgotPasswordRequestSchema', forgotPasswordRequestSchema);
 registry.register('ForgotPasswordVerifySchema', forgotPasswordVerifySchema);
 registry.register('ForgotPasswordResetSchema', forgotPasswordResetSchema);
@@ -103,6 +126,8 @@ export type EmailLoginInput = z.infer<typeof emailLoginSchema>;
 export type GoogleLoginInput = z.infer<typeof googleLoginSchema>;
 export type AnonymousLoginInput = z.infer<typeof anonymousLoginSchema>;
 export type SouliKeyRestoreInput = z.infer<typeof souliKeyRestoreSchema>;
+export type ResetJourneyInput = z.infer<typeof resetJourneySchema>;
+export type EraseAllDataInput = z.infer<typeof eraseAllDataSchema>;
 export type LinkProviderInput = z.infer<typeof linkProviderSchema>;
 export type ForgotPasswordRequestInput = z.infer<
     typeof forgotPasswordRequestSchema

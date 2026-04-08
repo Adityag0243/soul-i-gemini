@@ -21,7 +21,7 @@ router.use(apiKeyMiddleware);
 
 router.use(permission(Permission.GENERAL) as RequestHandler);
 
-// legacy auth routes
+// legacy auth routes  --> i am not using the template legacy auth
 // router.use('/auth', authRoutes);
 
 // modular auth routes

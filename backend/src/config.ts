@@ -4,7 +4,7 @@ import fs from 'fs';
 import path from 'path';
 
 dotenv.config();
-//read the pem key: prefer env var, fallback to keys file
+
 function readKey(envVar: string, filename: string): string {
     const envValue = process.env[envVar];
     if (envValue) return envValue;
@@ -103,7 +103,7 @@ export const paymentConfig = {
     stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET || '',
     razorpayWebhookSecret: process.env.RAZORPAY_WEBHOOK_SECRET || '',
 
-    // Subscription reminders (in days before expiry)
+    // subscription reminders (in days before expiry)
     subscriptionReminderDays: parseInt(
         process.env.SUBSCRIPTION_REMINDER_DAYS || '7',
     ),
