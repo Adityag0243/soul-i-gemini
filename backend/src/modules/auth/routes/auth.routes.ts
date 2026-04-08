@@ -9,6 +9,8 @@ import {
     emailLoginSchema,
     googleLoginSchema,
     anonymousLoginSchema,
+    authRequestSchema,
+    refreshTokenSchema,
     souliKeyRestoreSchema,
     forgotPasswordRequestSchema,
     forgotPasswordVerifySchema,
@@ -21,6 +23,36 @@ import * as AuthController from '../controllers/auth.controller';
 const router = Router();
 
 //swagger documentation
+
+registry.registerPath({
+    method: 'post',
+    path: '/auth/token/refresh',
+    summary: 'Refresh tokens',
+    description:
+        'Issue new access and refresh tokens. Send refresh token in body or cookies and provide access token in Authorization header or cookies.',
+    tags: ['Auth'],
+    security: [{ apiKey: [] }],
+    request: {
+        body: {
+            content: {
+                'application/json': {
+                    schema: refreshTokenSchema,
+                },
+            },
+        },
+    },
+    responses: {
+        200: {
+            description: 'New tokens issued',
+        },
+        401: {
+            description: 'Invalid or expired tokens',
+        },
+        403: {
+            description: 'Missing or invalid API key',
+        },
+    },
+});
 
 registry.registerPath({
     method: 'post',
@@ -325,6 +357,14 @@ router.post(
     '/anonymous',
     validator(anonymousLoginSchema, ValidationSource.BODY),
     asyncHandler(AuthController.anonymousLogin),
+);
+
+// refresh token pair
+router.post(
+    '/token/refresh',
+    validator(authRequestSchema, ValidationSource.REQUEST),
+    validator(refreshTokenSchema, ValidationSource.REQUEST),
+    asyncHandler(AuthController.refreshTokens),
 );
 
 // restore with souli key

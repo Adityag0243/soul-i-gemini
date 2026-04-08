@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { registry } from '../../../swagger-docs/swagger';
+import { ZodAuthBearer, ZodCookies } from '../../../helpers/validator';
 
 const passwordSchema = z
     .string()
@@ -87,6 +88,23 @@ export const forgotPasswordResetSchema = z
         path: ['confirmPassword'],
     });
 
+export const authRequestSchema = z
+    .object({
+        headers: z.object({
+            authorization: ZodAuthBearer.optional(),
+        }),
+        cookies: ZodCookies.optional(),
+    })
+    .refine(
+        (data) =>
+            Boolean(data.headers.authorization) ||
+            Boolean(data.cookies?.accessToken),
+        {
+            message:
+                'Token is required either in Authorization header or in cookies',
+        },
+    );
+
 // refresh Token Schema
 export const refreshTokenSchema = z
     .object({
@@ -120,6 +138,7 @@ registry.register('EraseAllDataSchema', eraseAllDataSchema);
 registry.register('ForgotPasswordRequestSchema', forgotPasswordRequestSchema);
 registry.register('ForgotPasswordVerifySchema', forgotPasswordVerifySchema);
 registry.register('ForgotPasswordResetSchema', forgotPasswordResetSchema);
+registry.register('AuthRequestSchema', authRequestSchema);
 
 export type EmailRegisterInput = z.infer<typeof emailRegisterSchema>;
 export type EmailLoginInput = z.infer<typeof emailLoginSchema>;

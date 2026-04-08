@@ -2,9 +2,11 @@ import { Request, Response } from 'express';
 import {
     SuccessResponse,
     SuccessCreatedResponse,
+    TokenRefreshResponse,
 } from '../../../core/api-response';
 import { clearCookies } from '../../../core/cookie-utils';
 import { setCookies } from '../../../core/cookie-utils';
+import { getAccessToken, getRefreshToken } from '../../../core/auth-utils';
 import { ProtectedRequest } from '../../../types/app-requests';
 import AuthService from '../services/auth.service';
 import {
@@ -90,6 +92,30 @@ export async function anonymousLogin(
         tokens: result.tokens,
         souliKey: result.souliKey, // Important: User must save this key!
     }).send(res);
+}
+
+// refresh auth tokens
+// POST /auth/token/refresh
+
+export async function refreshTokens(
+    req: ProtectedRequest,
+    res: Response,
+): Promise<void> {
+    const accessToken = getAccessToken(req);
+    const refreshToken = getRefreshToken(req);
+
+    const tokens = await AuthService.refreshTokenPair(
+        accessToken,
+        refreshToken,
+    );
+
+    setCookies(res, tokens);
+
+    new TokenRefreshResponse(
+        'Token Issued',
+        tokens.accessToken,
+        tokens.refreshToken,
+    ).send(res);
 }
 
 // restore session with Souli Key

@@ -16,7 +16,8 @@ import {
     AuthFailureError,
     InternalError,
 } from '../../../core/api-error';
-import { createTokens } from '../../../core/auth-utils';
+import { createTokens, validateTokenData } from '../../../core/auth-utils';
+import JWT from '../../../core/jwt-utils';
 import AuthIdentityRepo from '../repositories/auth-identity.repo';
 import AuthTokenRepo from '../repositories/auth-token.repo';
 import { subscriptionRepository } from '../../../database/repositories/subscription.repo';
@@ -602,6 +603,54 @@ export async function loginAnonymous(
     };
 }
 
+export async function refreshTokenPair(
+    accessToken: string,
+    refreshToken: string,
+): Promise<{ accessToken: string; refreshToken: string }> {
+    const accessTokenPayload = await JWT.decode(accessToken);
+    validateTokenData(accessTokenPayload);
+
+    const userId = parseInt(accessTokenPayload.sub, 10);
+    if (isNaN(userId)) {
+        throw new AuthFailureError('Invalid user ID in token');
+    }
+
+    const user = await prisma.user.findUnique({
+        where: { id: userId },
+    });
+
+    if (!user || !user.status) {
+        throw new AuthFailureError('User not registered');
+    }
+
+    const refreshTokenPayload = await JWT.validate(refreshToken);
+    validateTokenData(refreshTokenPayload);
+
+    if (accessTokenPayload.sub !== refreshTokenPayload.sub) {
+        throw new AuthFailureError('Invalid access token');
+    }
+
+    const keystore = await prisma.keystore.findFirst({
+        where: {
+            clientId: user.id,
+            primaryKey: accessTokenPayload.prm,
+            secondaryKey: refreshTokenPayload.prm,
+        },
+    });
+
+    if (!keystore) {
+        throw new AuthFailureError('Invalid access token');
+    }
+
+    await prisma.keystore.delete({
+        where: { id: keystore.id },
+    });
+
+    const newSession = await createSession(user.id);
+
+    return createTokens(user, newSession.primaryKey, newSession.secondaryKey);
+}
+
 export async function requestPasswordResetOtp(
     input: ForgotPasswordRequestInput,
 ): Promise<{ message: string }> {
@@ -958,6 +1007,7 @@ export default {
     loginWithEmail,
     loginWithGoogle,
     loginAnonymous,
+    refreshTokenPair,
     requestPasswordResetOtp,
     verifyPasswordResetOtp,
     resetPassword,

@@ -1,15 +1,19 @@
 import { Response, NextFunction } from 'express';
-import schema from './schema';
-import { validator } from '../../middlewares/validator.middleware';
-import { ValidationSource } from '../../helpers/validator';
-import { asyncHandler } from '../../core/async-handler';
-import { PublicRequest } from '../../types/app-requests';
-import { ForbiddenError } from '../../core/api-error';
-import { Header } from '../../core/utils';
-import ApiKeyRepo from '../../database/repositories/api-key.repo';
+import z from 'zod';
+import { validator } from './validator.middleware';
+import { ValidationSource } from '../helpers/validator';
+import { asyncHandler } from '../core/async-handler';
+import { PublicRequest } from '../types/app-requests';
+import { ForbiddenError } from '../core/api-error';
+import { Header } from '../core/utils';
+import ApiKeyRepo from '../database/repositories/api-key.repo';
+
+const apiKeySchema = z.object({
+    [Header.API_KEY]: z.string(),
+});
 
 export const apiKeyMiddleware = [
-    validator(schema.apiKey, ValidationSource.HEADER),
+    validator(apiKeySchema, ValidationSource.HEADER),
 
     asyncHandler<PublicRequest>(
         async (req: PublicRequest, _res: Response, next: NextFunction) => {
