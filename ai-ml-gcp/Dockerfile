@@ -1,6 +1,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Souli Pipeline — Production Dockerfile
-# Runs on GCE VM alongside Ollama + Qdrant containers via docker-compose.gcp.yml
+# Runs on EC2/GCE VM alongside Ollama + Qdrant containers via docker-compose
+# Use docker-compose.aws.yml (default) or docker-compose.gcp.yml
 # ─────────────────────────────────────────────────────────────────────────────
 FROM nvidia/cuda:12.8.0-runtime-ubuntu22.04
 # System deps + Python 3.11
@@ -29,5 +30,5 @@ RUN pip install .
 RUN mkdir -p /app/data /app/outputs
 ENV PYTHONUNBUFFERED=1
 ENV SOULI_LOG_LEVEL=INFO
-ENV SOULI_CONFIG=/app/configs/pipeline.gcp.yaml
+ENV SOULI_CONFIG=/app/configs/pipeline.aws.yaml
 CMD ["souli", "--help"]
