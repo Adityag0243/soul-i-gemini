@@ -45,7 +45,7 @@ def _content_uuid(text: str, source: str) -> str:
 def _get_qdrant_client(host: str = "localhost", port: int = 6333):
     try:
         from qdrant_client import QdrantClient
-        client = QdrantClient(host=host, port=port, timeout=5)
+        client = QdrantClient(host=host, port=port, timeout=8)
         client.get_collections()
         return client
     except Exception:
@@ -67,9 +67,11 @@ def _ensure_collection(client, collection: str):
 
 def _get_encoder(model_name: str = _DEFAULT_MODEL):
     if model_name not in _encoder_cache:
+        import torch
         from sentence_transformers import SentenceTransformer
-        logger.info("Loading embedding model: %s", model_name)
-        _encoder_cache[model_name] = SentenceTransformer(model_name)
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        logger.info("Loading embedding model: %s on device: %s", model_name, device)
+        _encoder_cache[model_name] = SentenceTransformer(model_name, device=device)
     return _encoder_cache[model_name]
 
 
