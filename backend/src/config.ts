@@ -32,6 +32,7 @@ export const tokenInfo = {
     ), // 15 minutes default
     refreshTokenValidity: parseInt(
         process.env.REFRESH_TOKEN_VALIDITY_SEC || '2592000', // 30 days default
+        10,
     ),
     issuer: process.env.TOKEN_ISSUER || '',
     audience: process.env.TOKEN_AUDIENCE || '',

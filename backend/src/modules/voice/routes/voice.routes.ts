@@ -12,7 +12,6 @@ import * as VoiceController from '../controllers/voice.controller';
 
 const router = Router();
 
-// voice endpoints require user authentication
 router.use(authMiddleware as unknown as RequestHandler);
 
 registry.registerPath({

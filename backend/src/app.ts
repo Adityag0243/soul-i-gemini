@@ -17,7 +17,7 @@ process.on('uncaughtException', (e) => {
 
 export const app = express();
 
-// webhooks must use raw body for signature verification and bypass API key/auth middleware.
+// webhooks raw body for signature verification
 app.post(
     '/webhooks/stripe',
     express.raw({ type: 'application/json' }),
