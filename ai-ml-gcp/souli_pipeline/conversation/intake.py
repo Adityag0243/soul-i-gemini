@@ -73,9 +73,10 @@ SHARING_PROBES: Dict[str, List[str]] = {
 }
 
 # First message Souli sends — warm intro, asks for name
+
 GREETING_MESSAGE = (
-    "Hi, I'm Souli. I'm here to sit with you — to understand your soul, your emotions, "
-    "and walk alongside you. Before we begin, could you tell me your name?"
+    "Hi {name}, I'm Souli — I'm here to sit with you, understand what you're feeling, "
+    "and walk alongside you.  What's been on your mind or in your heart lately?"
 )
 
 # Opening question after name is collected — light, not heavy
@@ -124,7 +125,7 @@ _RICH_EMOTION_WORDS = {
     "toot gaya", "toot gayi", "ro raha", "ro rahi", "nahi rehna",
 }
 
-_RICH_MIN_WORDS = 12   # message must have at least this many words to be "rich"
+_RICH_MIN_WORDS = 15   # message must have at least this many words to be "rich"
 _RICH_MIN_EMOTIONAL_HITS = 1  # at least one emotional keyword
 
 

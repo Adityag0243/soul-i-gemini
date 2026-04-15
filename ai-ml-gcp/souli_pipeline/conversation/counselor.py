@@ -9,6 +9,7 @@ All inference is local. No data leaves the machine.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Dict, Generator, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -143,25 +144,48 @@ Present practices as gentle invitations, not prescriptions.
 # ---------------------------------------------------------------------------
 # Prompt builders
 # ---------------------------------------------------------------------------
+# Maps chunk_type values to human-readable labels for the LLM prompt
+_CHUNK_TYPE_LABELS = {
+    "healing":    "[HEALING PRINCIPLE]",
+    "activities": "[PRACTICE / ACTIVITY]",
+    "stories":    "[STORY / METAPHOR]",
+    "commitment": "[REFLECTION QUESTION]",
+    "patterns":   "[PROBLEM PATTERN]",
+    "general":    "[TEACHING REFERENCE]",
+    "teaching":   "[TEACHING REFERENCE]",   # legacy chunk_type from old ingestion
+}
+
 
 def _build_rag_context(chunks: List[Dict]) -> str:
+    """
+    Build the RAG context block injected into the counselor prompt.
+
+    Each chunk is labelled by its type (e.g. [HEALING PRINCIPLE]) so the LLM
+    knows HOW to use each piece of content — whether it's a story to echo,
+    a practice to suggest, or a reflection question to ask.
+
+    Score threshold: 0.35 (lowered from 0.50 because typed collections are
+    more specific — a healing chunk in souli_healing has inherently higher
+    precision even at moderate similarity scores).
+    """
     if not chunks:
         return ""
-    
-    # Only use chunks with decent relevance score
-    # Score below 0.50 means the knowledge base didn't find anything truly related
-    good_chunks = [c for c in chunks if c.get("score", 0) >= 0.50]
-    
-    if not good_chunks:
-        return ""  # Don't inject weak/irrelevant context
-    
-    lines = ["[Style & Knowledge Reference — how Souli's counselor handles similar moments:]"]
-    for i, c in enumerate(good_chunks[:3], 1):
-        text = (c.get("text") or "").strip()
-        if text:
-            lines.append(f"{i}. {text[:400]}")
-    return "\n".join(lines)
 
+    good_chunks = [c for c in chunks if c.get("score", 0) >= 0.35]
+
+    if not good_chunks:
+        return ""
+
+    lines = ["[Teaching Reference — how Souli's counselor handles similar moments:]"]
+    for c in good_chunks[:4]:          # allow up to 4 (vs old 3) since typed chunks are shorter
+        text = (c.get("text") or "").strip()
+        if not text:
+            continue
+        chunk_type = c.get("chunk_type", "general")
+        label = _CHUNK_TYPE_LABELS.get(chunk_type, "[TEACHING REFERENCE]")
+        lines.append(f"{label} {text[:350]}")
+
+    return "\n".join(lines)
 
 def _build_chat_messages(
     history: List[Dict[str, str]],
@@ -191,12 +215,18 @@ def _build_solution_prompt(
     energy_node: str,
     framework_solution: Dict,
     user_context: str,
+    activity_chunks: List[Dict] = None,
 ) -> str:
     node_label = energy_node.replace("_", " ").title()
 
     practices = framework_solution.get("primary_practices ( 7 min quick relief)", "")
     healing = framework_solution.get("primary_healing_principles", "")
     deeper = framework_solution.get("deeper_meditations_program ( 7 day quick recovery)", "")
+    activity_detail = ""
+    if activity_chunks:
+        detail_lines = [c["text"] for c in activity_chunks[:3] if c.get("text")]
+        if detail_lines:
+            activity_detail = "\n".join(detail_lines)
 
     # Take last 300 chars of context — the most recent/emotionally loaded part
 
@@ -206,10 +236,12 @@ def _build_solution_prompt(
         f"The person is experiencing {node_label}.\n\n"
         f"Here is exactly what they shared in this conversation — use ONLY this, nothing else:\n"
         f"{recent_context}\n\n"
-        f"IMPORTANT: Only reference things they actually mentioned above. "
+        f"IMPORTANT: Only reference things they actually mentioned above which is said by user not from the framework or Knowledge Base. "
         f"If they only said they feel drained or tired, that's all you have — don't invent details.\n\n"
         f"Healing principles to weave in naturally: {healing[:400]}\n\n"
-        f"Practices to suggest (present as gentle invitations, not a list): {practices[:300]}\n\n"
+        f"Take any one or two relevant practice from {activity_detail[:400]} + {practices[:300]} invite user with gentle language to try it out. Do NOT present practices as a list — instead, weave them into your suggestions in a warm, personalized way."
+        f"Gentle language example 'I found a practice that helps clear mental fog by balancing your breath. It takes about 4 minutes. Would you like to try it with me?', how it helps + how much time it takes + invitation to try it."
+        f"Make sure suggested practice or activity is well instructed with clear step by step instructions if it's not a common practice. If it is a common practice like journaling or walking, then no need for instructions just invite them to do it in a warm way. "
         f"Deeper recovery if they want to go further: {deeper[:200]}\n\n"
         f"Write a warm, personal response. Do NOT write generic wellness advice. "
         f"The person should feel you understood THEIR situation specifically."
@@ -234,6 +266,7 @@ def generate_counselor_response(
     phase: Optional[str] = None,
     asked_topics: Optional[List[str]] = None,
     last_souli_question: Optional[str] = None,
+    system_override: Optional[str] = None, 
 ) -> str | Generator[str, None, None]:
     """
     Generate an empathetic counselor response using Ollama llama3.1 + RAG.
@@ -253,6 +286,8 @@ def generate_counselor_response(
     messages = _build_chat_messages(history, user_message, rag_chunks, energy_node)
     system = _build_counselor_system(user_name=user_name, phase=phase, asked_topics=asked_topics)
 
+    if system_override:       
+        system = system_override  
     if stream:
         return llm.chat_stream(messages, system=system, temperature=temperature)
     else:
@@ -272,6 +307,21 @@ def generate_solution_response(
     Generate a solution-mode response: warm presentation of practices + meditations.
     """
     from ..llm.ollama import OllamaLLM
+    
+    activity_chunks = []
+    try:
+        from ..retrieval.qdrant_store_multi import query_by_phase
+        activity_chunks = query_by_phase(
+            user_text=user_context[-200:],
+            phase="solution",
+            energy_node=energy_node,
+            top_k=3,
+        )
+        # Keep only activity type
+        activity_chunks = [c for c in activity_chunks if c.get("chunk_type") == "activities"]
+    except Exception as e:
+        logger.warning("Could not fetch activity chunks for solution: %s", e)
+    
 
     llm = OllamaLLM(
         model=ollama_model,
@@ -280,13 +330,105 @@ def generate_solution_response(
         num_ctx=2048,
     )
 
-    prompt = _build_solution_prompt(energy_node, framework_solution, user_context)
+    prompt = _build_solution_prompt(energy_node, framework_solution, user_context, activity_chunks)
     messages = [{"role": "user", "content": prompt}]
 
     if stream:
         return llm.chat_stream(messages, system=_SOLUTION_SYSTEM, temperature=temperature)
     else:
         return llm.chat(messages, system=_SOLUTION_SYSTEM, temperature=temperature)
+
+
+
+_ACTIVITY_SYSTEM = """\
+You are Souli, a warm inner wellness guide.
+The person has agreed to try an activity. Now give them clear, step-by-step instructions.
+Be specific. Be encouraging. Keep it short — 150-200 words max.
+End with one gentle reminder about how to carry this feeling forward in their day.
+"""
+def _build_activity_steps_prompt(
+    energy_node: str,
+    framework_solution: Dict,
+    user_context: str,
+    activity_chunks: List[Dict] = None,   # ← Qdrant se aaye detailed instructions
+) -> str:
+    practices = framework_solution.get("primary_practices ( 7 min quick relief)", "")
+    healing = framework_solution.get("primary_healing_principles", "")
+    node_label = energy_node.replace("_", " ").title()
+
+    # ── Activity detail source: Qdrant first, Excel fallback ──────────
+    if activity_chunks:
+        # Qdrant mein real step-by-step instructions hain
+        activity_detail = "\n\n".join(
+            c["text"] for c in activity_chunks[:2] if c.get("text")
+        )
+        activity_name = activity_chunks[0]["text"].split(":")[0].strip()
+    else:
+        # Qdrant empty hai (abhi tak koi video ingest nahi hua) — Excel fallback
+        activity_name = practices.split(",")[0].strip() if practices else "a grounding practice"
+        activity_detail = f"Practice: {practices[:300]}"
+
+    return (
+        f"The person has {node_label} and just agreed to try an activity.\n\n"
+        f"What they shared: {user_context[-200:].strip()}\n\n"
+        f"Activity to guide them through:\n{activity_detail}\n\n"
+        f"Core healing principle to weave in at the end: {healing[:200]}\n\n"
+        f"Give them step-by-step instructions for '{activity_name}' — "
+        f"numbered steps, warm tone, 150-200 words. "
+        f"End with one sentence reminding them how to carry this feeling into their day."
+    )
+
+def generate_activity_steps_response(
+    energy_node: str,
+    framework_solution: Dict,
+    user_context: str,
+    ollama_model: str = "llama3.1",
+    ollama_endpoint: str = "http://localhost:11434",
+    qdrant_host: str = "localhost",      # ← ADD
+    qdrant_port: int = 6333,             # ← ADD
+    temperature: float = 0.6,
+    stream: bool = False,
+):
+    from ..llm.ollama import OllamaLLM
+
+    # ── Qdrant se activity chunks fetch karo ─────────────────────────
+    activity_chunks = []
+    try:
+        from ..retrieval.qdrant_store_multi import query_by_phase
+        all_chunks = query_by_phase(
+            user_text=user_context[-300:],
+            phase="solution",
+            energy_node=energy_node,
+            top_k=3,
+            host=qdrant_host,
+            port=qdrant_port,
+        )
+        # Sirf activities type ke chunks chahiye
+        activity_chunks = [c for c in all_chunks if c.get("chunk_type") == "activities"]
+        if activity_chunks:
+            logger.info("[SOLUTION] Fetched %d activity chunks from Qdrant for %s", 
+                       len(activity_chunks), energy_node)
+        else:
+            logger.info("[SOLUTION] No Qdrant activity chunks found — using Excel fallback")
+    except Exception as e:
+        logger.warning("[SOLUTION] Qdrant activity fetch failed: %s", e)
+    # ─────────────────────────────────────────────────────────────────
+
+    llm = OllamaLLM(
+        model=ollama_model,
+        endpoint=ollama_endpoint,
+        temperature=temperature,
+        num_ctx=2048,
+    )
+    prompt = _build_activity_steps_prompt(
+        energy_node, framework_solution, user_context, activity_chunks  # ← pass karo
+    )
+    messages = [{"role": "user", "content": prompt}]
+    if stream:
+        return llm.chat_stream(messages, system=_ACTIVITY_SYSTEM, temperature=temperature)
+    else:
+        return llm.chat(messages, system=_ACTIVITY_SYSTEM, temperature=temperature)
+
 
 
 def fallback_response(energy_node: Optional[str], user_text: str = "") -> str:

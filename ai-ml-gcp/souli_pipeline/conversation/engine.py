@@ -35,6 +35,11 @@ PHASE_SHARING      = "sharing"
 PHASE_SOLUTION     = "solution"
 
 
+def _is_yes(text: str) -> bool:
+    t = text.lower().strip()
+    return bool(re.search(
+        r"\b(yes|yeah|yep|sure|okay|ok|haan|ha|let'?s|go ahead|try|give it a try|love to|would love)\b", t
+    ))
 
 @dataclass
 class ConversationState:
@@ -56,6 +61,8 @@ class ConversationState:
     problem_messages: List[str] = field(default_factory=list)
     summary_attempted: bool = False
     summary_confirmed: bool = False
+    solution_turn: int = 0
+    solution_pending: bool = False
     rich_opening: bool = False
     _last_diagnosis_detail: Dict = field(default_factory=dict)   # for debug panel
 
@@ -75,6 +82,7 @@ class ConversationEngine:
         qdrant_collection: str = "souli_chunks",
         embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2",
         nodes_allowed: Optional[List[str]] = None,
+        use_multi_collections: bool = True,
         framework: Optional[Dict] = None,
         gold_df=None,
     ):
@@ -88,6 +96,7 @@ class ConversationEngine:
         self.qdrant_port      = qdrant_port
         self.qdrant_collection= qdrant_collection
         self.embedding_model  = embedding_model
+        self.use_multi_collections = use_multi_collections
         self.nodes_allowed    = nodes_allowed or [
             "blocked_energy", "depleted_energy", "scattered_energy",
             "outofcontrol_energy", "normal_energy",
@@ -141,6 +150,7 @@ class ConversationEngine:
             nodes_allowed=e.nodes_allowed,
             framework=framework,
             gold_df=gold_df,
+            use_multi_collections = getattr(cfg.conversation, "use_multi_collections", True),
         )
 
     # ------------------------------------------------------------------
@@ -164,7 +174,8 @@ class ConversationEngine:
 
     def greeting(self) -> str:
         from .intake import get_greeting
-        return get_greeting()
+        name = self.state.user_name or "Mary"   # backend will pass real name later
+        return get_greeting().format(name=name)
 
     # ------------------------------------------------------------------
     # Internal processing — TIMED at the top level
@@ -222,58 +233,31 @@ class ConversationEngine:
         s = self.state
         from .intake import is_rich_message
 
-        name = _extract_name(user_text)
-        s.user_name = name
-        words = user_text.lower().split()
-        shared_feelings = any(w in _NOT_NAMES for w in words)
-
+        name = s.user_name or "Mary"
+        self._diagnose(user_text)
+        
         if is_rich_message(user_text):
             s.rich_opening = True
-            self._diagnose(user_text)
-            s.phase = PHASE_SHARING
-            name_part = f"{name}, " if name else ""
-            return (
-                f"{name_part}I hear you, and I'm really glad you felt comfortable sharing that. "
-                f"That takes courage. Tell me more — what's been the hardest part of all this for you?"
-            )
-
-        s.phase = PHASE_INTAKE
-
-        if name and not shared_feelings:
-            responses = [
-                f"Really glad you're here, {name} 🤍 What's been on your mind lately?",
-                f"Good to meet you, {name}. What's been going on in your world?",
-                f"Hey {name} 🌿 What's been pulling at you lately?",
-                f"Nice to meet you, {name}. What would you like to talk about today?",
-                f"Lovely to have you here, {name}. What's been sitting with you?",
-                f"Glad you reached out, {name}. What's been on your heart lately?",
-                f"Good to have you here, {name} 🌊 What's been taking up space in your mind?",
-            ]
-            return random.choice(responses)
-
-        elif name and shared_feelings:
-            responses = [
-                f"Glad you're here, {name}. Tell me more — what's been going on?",
-                f"I hear that, {name} 🤍 What's been the heaviest part of it?",
-                f"Thanks for sharing that, {name}. What's been sitting with you the most?",
-                f"You're not alone in this, {name}. What's been weighing on you?",
-                f"Really glad you said something, {name}. What's been going on for you?",
-                f"That sounds like a lot, {name} 🌿 What's been the hardest part?",
-                f"I'm here, {name}. What would you like to start with?",
-            ]
-            return random.choice(responses)
-
+            s.phase = PHASE_SHARING       # rich → jump straight to sharing
         else:
-            responses = [
-                "Really glad you reached out. What's been on your mind?",
-                "Good to have you here. What's been going on for you lately?",
-                "Glad you're here. What's been sitting with you?",
-                "Thanks for showing up. What would you like to talk about?",
-                "I'm here with you. What's been taking up space in your heart lately?",
-                "Good that you reached out 🤍 What's been going on?",
-                "I'm listening. What's been weighing on you?",
-            ]
-            return random.choice(responses)
+            s.phase = PHASE_DEEPENING        # normal → go to intake
+
+        first_turn_system = (
+            f"You are Souli — a calm, grounded companion. Not a therapist. Not dramatic. "
+            f"The user's name is {name}. "
+            f"They have just shared something for the very first time. "
+            f"Your response must be 2 sentences max: "
+            f"1. Reflect back ONE specific thing they actually said — in plain, everyday language. No flowery words. No 'my heart goes out to you'. No 'it takes courage'. "
+            f"2. Ask ONE simple, direct question about what they shared — something you genuinely don't know yet. "
+            f"Tone: Like a calm, caring friend. Not a counselor on TV. "
+            f"NEVER say: 'my heart goes out', 'immense courage', 'vulnerable', 'grateful you shared', 'I can sense', 'It sounds like'. "
+            f"No advice. No coping tips. No multiple questions. Short and real."
+        )
+        
+        rag_query = user_text
+        rag = self._rag_retrieve(rag_query, s.energy_node)
+        response = self._llm_response(user_text, rag, stream, system_override=first_turn_system)
+        return response
 
     def _handle_intake(self, user_text: str, stream: bool):
         s = self.state
@@ -307,17 +291,30 @@ class ConversationEngine:
 
     def _handle_sharing(self, user_text: str, stream: bool):
         s = self.state
-        self._diagnose(s.user_text_buffer)
+        from .intake import get_sharing_probe, is_rich_message
+        from .intent import llm_detect_intent 
 
-        from .intent import detect_intent
-        intent = detect_intent(user_text)
+        # ── Check intent first — LLM based ───────────────────────────────
+        intent = ""
+        if len(user_text.strip().split()) <= 8:
+            intent = llm_detect_intent(user_text, self.chat_model, self.ollama_endpoint)
+        else:
+            from .intent import detect_intent
+            intent = detect_intent(user_text)
+            
         if intent == "solution":
             s.intent = "solution"
-            s.phase  = PHASE_SOLUTION
-            return self._handle_solution(user_text, stream)
+            s.phase = PHASE_SOLUTION
+            return self._route_to_solution_via_summary(user_text,stream) 
+        
+        _short = len(user_text.strip().split()) <= 4
+        if _short:
+            s.short_answer_count += 1
+        else:
+            s.short_answer_count = 0
 
-        sharing_turns = self._count_turns_in_phase(PHASE_SHARING)
-        if sharing_turns >= 2 and s.energy_node and not s.summary_attempted:
+        if s.short_answer_count >= 2 and s.energy_node and not s.summary_attempted:
+            s.short_answer_count = 0
             return self._trigger_summary(stream)
 
         from .intake import get_sharing_probe
@@ -401,11 +398,21 @@ class ConversationEngine:
  
         return summary_text
 
+    def _route_to_solution_via_summary(self, user_text: str, stream: bool):  # ← user_text add
+        s = self.state
+        if not s.summary_attempted:
+            s.solution_pending = True
+            return self._trigger_summary(stream)
+        else:
+            return self._handle_solution(user_text, stream) 
+            
+
     def _handle_summary_response(self, user_text: str, stream: bool):
         s = self.state
-        from .intent import detect_summary_response, detect_intent
+        from .intent import detect_summary_response, detect_intent, llm_detect_intent
 
-        intent = detect_intent(user_text)
+        intent = llm_detect_intent(user_text, self.chat_model, self.ollama_endpoint)
+        
         if intent == "solution":
             s.intent = "solution"
             s.summary_confirmed = True
@@ -416,13 +423,19 @@ class ConversationEngine:
 
         if response_type == "confirmed":
             s.summary_confirmed = True
+            if s.solution_pending:
+                s.solution_pending = False
+                s.phase = PHASE_SOLUTION
+                return self._handle_solution(user_text, stream)
             s.phase = PHASE_INTENT_CHECK
             return self._handle_intent_check(user_text, stream)
         elif response_type == "wants_more":
+            s.solution_pending = False
             s.phase = PHASE_SHARING
             rag = self._rag_retrieve(user_text, s.energy_node)
             return self._llm_response(user_text, rag, stream)
         elif response_type == "correction":
+            s.solution_pending = False 
             s.phase = PHASE_INTAKE
             s.summary_attempted = False
             name_part = f"{s.user_name}, " if s.user_name else ""
@@ -431,18 +444,14 @@ class ConversationEngine:
                 f"What felt off? What's the part that's weighing on you most right now?"
             )
         else:
-            s.phase = PHASE_SHARING
-            rag = self._rag_retrieve(user_text, s.energy_node)
-            return self._llm_response(user_text, rag, stream)
+            s.phase = PHASE_INTENT_CHECK
+            return self._handle_intent_check(user_text, stream)
 
     def _handle_intent_check(self, user_text: str, stream: bool):
         s = self.state
-        from .intent import detect_intent, INTENT_BRIDGE
+        from .intent import detect_intent, llm_detect_intent, INTENT_BRIDGE
 
-        intent = detect_intent(
-            user_text,
-            history_texts=[m["content"] for m in s.messages[-4:] if m["role"] == "user"],
-        )
+        intent = llm_detect_intent(user_text, self.chat_model, self.ollama_endpoint)
 
         if intent == "solution":
             s.intent = "solution"
@@ -469,7 +478,7 @@ class ConversationEngine:
         if intent == "solution":
             s.intent = "solution"
             s.phase  = PHASE_SOLUTION
-            return self._handle_solution(user_text, stream)
+            return self._route_to_solution_via_summary(user_text, stream) 
 
         _short = len(user_text.strip().split()) <= 3
         if _short:
@@ -490,35 +499,68 @@ class ConversationEngine:
         rag = self._rag_retrieve(user_text, s.energy_node)
         return self._llm_response(user_text, rag, stream)
 
+
+    
+        
+    from .counselor import generate_activity_steps_response
     def _handle_solution(self, user_text: str, stream: bool):
         s = self.state
         from .counselor import generate_solution_response
         from .solution import get_solution_for_node, format_solution_text
+        from .intent import llm_detect_intent  # already planned
 
         node = s.energy_node or "blocked_energy"
         sol  = get_solution_for_node(node, self.framework)
 
         if not sol:
-            logger.warning("No framework solution for node '%s' — using LLM only", node)
-            rag_query = self._build_rag_query(user_text)
-            rag = self._rag_retrieve(rag_query, node)
+            rag = self._rag_retrieve(self._build_rag_query(user_text), node)
             return self._llm_response(user_text, rag, stream)
 
+        s.solution_turn += 1
         user_context = s.user_text_buffer.strip()
-        try:
-            return generate_solution_response(
-                energy_node=node,
-                framework_solution=sol,
-                user_context=user_context,
-                ollama_model=self.chat_model,
-                ollama_endpoint=self.ollama_endpoint,
-                temperature=self.temperature,
-                stream=stream,
-            )
-        except Exception as exc:
-            logger.warning("Ollama solution generation failed: %s", exc)
-            return format_solution_text(node, sol)
 
+        # ── Turn 1: Intro + suggest first activity ─────────────────────────
+        if s.solution_turn == 1:
+            try:
+                return generate_solution_response(
+                    energy_node=node,
+                    framework_solution=sol,
+                    user_context=user_context,
+                    ollama_model=self.chat_model,
+                    ollama_endpoint=self.ollama_endpoint,
+                    temperature=self.temperature,
+                    stream=stream,
+                )
+            except Exception as exc:
+                logger.warning("Solution gen failed: %s", exc)
+                return format_solution_text(node, sol)
+
+        # ── Turn 2+: User said yes/no — give concrete steps ───────────────
+        intent = llm_detect_intent(user_text, self.chat_model, self.ollama_endpoint)
+        
+        if intent == "solution" or _is_yes(user_text):
+            # User agreed — give concrete step-by-step for the first activity
+            try:
+                return generate_activity_steps_response(
+                    energy_node=node,
+                    framework_solution=sol,
+                    user_context=user_context,
+                    ollama_model=self.chat_model,
+                    ollama_endpoint=self.ollama_endpoint,
+                    qdrant_host=self.cfg.retrieval.qdrant_host,   # ← ADD
+                    qdrant_port=self.cfg.retrieval.qdrant_port,   # ← ADD
+                    stream=stream,
+                )
+            except Exception as exc:
+                logger.warning("Activity steps gen failed: %s", exc)
+                return format_solution_text(node, sol)
+        else:
+            # User said no or unclear — acknowledge and offer something else
+            rag = self._rag_retrieve(user_text, node)
+            return self._llm_response(user_text, rag, stream)
+
+
+    
     # ------------------------------------------------------------------
     # Core helpers — all TIMED individually
     # ------------------------------------------------------------------
@@ -749,7 +791,86 @@ class ConversationEngine:
 
     @timed("engine._rag_retrieve")
     def _rag_retrieve(self, query: str, energy_node: Optional[str]) -> list:
-        """Retrieve relevant YouTube teaching chunks from Qdrant."""
+        """
+        Retrieve relevant YouTube teaching chunks from Qdrant.
+
+        Multi-collection mode (when use_multi_collections=True):
+        1. Calls query_by_phase() from qdrant_store_multi → typed collections
+            (healing / activities / stories / commitment / patterns)
+            based on current phase + turn_count
+        2. Also calls the general collection (souli_chunks_improved) as fallback
+        3. Merges + deduplicates by text content
+        4. Each chunk has a 'chunk_type' field so counselor can label it in prompt
+
+        Single-collection mode (use_multi_collections=False):
+        Falls back to original behaviour — just queries self.qdrant_collection
+        """
+        use_multi = getattr(self, "use_multi_collections", True)
+
+        # ── Multi-collection path ─────────────────────────────────────────────
+        if use_multi:
+            results = []
+
+            # Step 1: Phase-aware typed retrieval (healing/stories/activities etc.)
+            try:
+                from souli_pipeline.retrieval.qdrant_store_multi import query_by_phase
+                typed_chunks = query_by_phase(
+                    user_text=query,
+                    phase=self.state.phase,
+                    energy_node=energy_node,
+                    turn_count=self.state.turn_count,
+                    top_k=2,                          # 2 per typed collection
+                    embedding_model=self.embedding_model,
+                    host=self.qdrant_host,
+                    port=self.qdrant_port,
+                )
+                results.extend(typed_chunks)
+                logger.debug(
+                    "[RAG] Phase '%s' typed retrieval: %d chunks from multi-collections",
+                    self.state.phase, len(typed_chunks),
+                )
+            except Exception as exc:
+                logger.debug("[RAG] Multi-collection retrieval failed: %s", exc)
+
+            # Step 2: General collection (souli_chunks_improved) as semantic fallback
+            try:
+                from souli_pipeline.retrieval.qdrant_store_improved import query_improved_chunks
+                general_chunks = query_improved_chunks(
+                    user_text=query,
+                    collection="souli_chunks_improved",
+                    energy_node=energy_node,
+                    top_k=self.rag_top_k,
+                    embedding_model=self.embedding_model,
+                    host=self.qdrant_host,
+                    port=self.qdrant_port,
+                )
+                # Tag them so counselor knows these are general chunks
+                for c in general_chunks:
+                    c.setdefault("chunk_type", "general")
+                results.extend(general_chunks)
+                logger.debug("[RAG] General collection: %d chunks", len(general_chunks))
+            except Exception as exc:
+                logger.debug("[RAG] General collection retrieval failed: %s", exc)
+
+            # Step 3: Deduplicate by text content (same teaching can be in multiple collections)
+            seen_texts: set = set()
+            deduped = []
+            for c in results:
+                txt = (c.get("text") or "").strip()[:300]  # first 300 chars as key
+                if txt and txt not in seen_texts:
+                    seen_texts.add(txt)
+                    deduped.append(c)
+
+            # Step 4: Sort by score descending so best chunks go first
+            deduped.sort(key=lambda c: c.get("score", 0), reverse=True)
+
+            logger.info(
+                "[RAG] Multi-collection total: %d unique chunks (phase=%s, node=%s)",
+                len(deduped), self.state.phase, energy_node,
+            )
+            return deduped
+
+        # ── Single-collection fallback path (original behaviour) ─────────────
         try:
             from souli_pipeline.retrieval.qdrant_store import query_chunks
             return query_chunks(
@@ -764,9 +885,9 @@ class ConversationEngine:
         except Exception as exc:
             logger.debug("Qdrant retrieval failed: %s", exc)
             return []
-
+        
     @timed("engine._llm_response")
-    def _llm_response(self, user_text: str, rag_chunks: list, stream: bool):
+    def _llm_response(self, user_text: str, rag_chunks: list, stream: bool, system_override: str = None):
         """Generate counselor response via Ollama."""
         from .counselor import generate_counselor_response, fallback_response
 
@@ -808,6 +929,7 @@ class ConversationEngine:
                 phase=self.state.phase,
                 asked_topics=asked_topics,
                 last_souli_question=last_souli_question,
+                system_override=system_override, 
             )
         except Exception as exc:
             logger.warning("Ollama response failed: %s — using fallback.", exc)

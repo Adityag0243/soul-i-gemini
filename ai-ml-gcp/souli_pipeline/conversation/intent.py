@@ -149,6 +149,70 @@ def detect_summary_response(text: str) -> Literal["confirmed", "wants_more", "co
     return "unclear"
 
 
+# ---------------------------------------------------------------------------
+# LLM-based intent detection (fallback when keywords are unclear)
+# ---------------------------------------------------------------------------
+
+_INTENT_SYSTEM = """\
+You are a classifier for a wellness conversation app called Souli.
+Your job is to read what the user said and decide their intent.
+
+Return ONLY one word — nothing else:
+- "solution"  → user wants advice, practices, help, or guidance
+- "venting"   → user wants to be heard, just talking, not asking for help
+- "unclear"   → genuinely impossible to tell
+
+Examples:
+"i want solution" → solution
+"yes i would love to explore" → solution  
+"let's go" → solution
+"yes please" → solution
+"i just want to talk" → venting
+"nobody understands me" → venting
+"hmm" → unclear
+"""
+
+def llm_detect_intent(
+    text: str,
+    ollama_model: str = "llama3.1",
+    ollama_endpoint: str = "http://localhost:11434",
+) -> IntentType:
+    """
+    First tries keyword patterns (fast, free).
+    If keywords return 'unclear', asks the LLM.
+    If LLM also fails or Ollama is down, returns 'unclear'.
+    """
+    # Step 1: try keywords first
+    keyword_result = detect_intent(text)
+    if keyword_result != "unclear":
+        return keyword_result
+
+    # Step 2: keywords weren't sure — ask LLM
+    try:
+        from souli_pipeline.llm.ollama import OllamaLLM
+        llm = OllamaLLM(
+            model=ollama_model,
+            endpoint=ollama_endpoint,
+            timeout_s=10,        # short timeout — this is a quick call
+            temperature=0.3,     # deterministic
+            num_ctx=512,         # tiny context — just one message
+        )
+        if not llm.is_available():
+            return "unclear"
+
+        prompt = f'User said: "{text}"\n\nWhat is their intent? Reply with one word only.'
+        raw = llm.generate(prompt=prompt, system=_INTENT_SYSTEM).strip().lower()
+
+        if "solution" in raw:
+            return "solution"
+        if "venting" in raw:
+            return "venting"
+        return "unclear"
+
+    except Exception:
+        return "unclear"
+
+
 def detect_intent(text: str, history_texts: list[str] | None = None) -> IntentType:
     """
     Detect user intent from current message and optionally recent history.
@@ -177,7 +241,7 @@ def detect_intent(text: str, history_texts: list[str] | None = None) -> IntentTy
     words = combined.split()
     if len(words) < 15:
         return "venting"
-
+    
     return "unclear"
 
 

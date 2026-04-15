@@ -25,15 +25,18 @@ NODES = [
 # Short descriptions fed to Qwen so it understands each node
 NODE_DESCRIPTIONS = {
     "blocked_energy": (
-        "STAGNATION/FROZEN: The energy is present but stuck or suppressed. "
-        "Keywords: Numbness, 'stuck in a loop,' paralysis, withdrawal, "
-        "procrastination, or feeling 'dead inside.' It is a lack of movement."
+        "STAGNATION/FROZEN: Energy is present but completely stuck or suppressed. "
+        "The person feels numb, dead inside, or in a loop they cannot break. "
+        "Keywords: guilt, shame, 'stuck in a loop', paralysis, withdrawal from people, "
+        "procrastination from fear of pain, emotional shutdown, hiding from life."
     ),
     "depleted_energy": (
-        "EMPTY/EXHAUSTED: The 'battery' is at 0%. "
-        "Keywords: Drained, running on empty, 'I have nothing left,' low capacity, "
-        "feeling like a victim, or giving up because of physical/mental fatigue. "
-        "It is a lack of resource."
+        "EMPTY/EXHAUSTED FROM GIVING: The person has been over-giving to others and has nothing left for themselves. "
+        "They delay their own decisions, suppress their own feelings, carry family/relationship responsibilities, "
+        "people-please, avoid conflict, hide their struggles to appear strong. "
+        "Keywords: 'I always put others first', responsible for everyone's feelings, "
+        "fear of disappointing others, emotional suppression, choosing safe over fulfilling, "
+        "peacemaker role, hiding struggles, 'good daughter/wife/mother' image pressure."
     ),
     "scattered_energy": (
         "DIFFUSE/UNFOCUSED: Energy is high but lacks a center. "
@@ -65,8 +68,18 @@ Respond with ONLY valid JSON — no explanation outside the JSON block.
 """
 
 _USER_PROMPT = """\
-Analyze the following transcript chunk. 
-Focus on the speaker's tone and the specific 'lack' they are describing (lack of movement, lack of resource, lack of focus, or lack of restraint).
+Read the following transcript chunk carefully.
+
+Decide which energy state the speaker is ADDRESSING or EXPERIENCING.
+Ask yourself:
+- Is this content about healing, oneness, presence, or growth? → normal_energy
+- Does the speaker describe being stuck, numb, frozen, or withdrawn? → blocked_energy
+- Does the speaker describe exhaustion, burnout, or having nothing left? → depleted_energy
+- Does the speaker describe overwhelm, anxiety, or too many thoughts? → scattered_energy
+- Does the speaker describe rage, impulsivity, or emotional explosions? → outofcontrol_energy
+
+If the content is a teaching, story, or metaphor — pick the node that matches what PROBLEM it is trying to SOLVE.
+If the content is an opening remark, greeting, or neutral statement — pick normal_energy.
 
 Transcript chunk:
 \"\"\"
@@ -75,9 +88,8 @@ Transcript chunk:
 
 Return JSON with exactly these keys:
 - "energy_node": one of {nodes}
-- "reason": one sentence explaining why this node applies (max 25 words).
+- "reason": one sentence explaining why, referencing something specific from the text (max 25 words).
 """
-
 
 
 

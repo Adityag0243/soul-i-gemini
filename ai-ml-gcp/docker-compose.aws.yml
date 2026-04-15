@@ -33,7 +33,7 @@ x-souli-env: &souli-env
   OLLAMA_TAGGER_MODEL: ${OLLAMA_TAGGER_MODEL:-qwen2.5:1.5b}
   QDRANT_HOST: qdrant
   QDRANT_PORT: 6333
-  QDRANT_COLLECTION: ${QDRANT_COLLECTION:-souli_chunks}
+  QDRANT_COLLECTION: ${QDRANT_COLLECTION:-souli_chunks_improved}
   LIVEKIT_URL: ${LIVEKIT_URL}
   LIVEKIT_API_KEY: ${LIVEKIT_API_KEY}
   LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
@@ -41,6 +41,7 @@ x-souli-env: &souli-env
   SOULI_OUTPUTS_DIR: /app/outputs
   SOULI_LOG_LEVEL: ${SOULI_LOG_LEVEL:-INFO}
   SOULI_CONFIG_PATH: /app/configs/pipeline.aws.yaml
+  TRANSFORMERS_VERBOSITY: error 
 
 x-souli-volumes: &souli-volumes
   - souli-data:/app/data
@@ -187,7 +188,7 @@ services:
       - OLLAMA_ENDPOINT=http://ollama:11434
       - QDRANT_HOST=qdrant
       - QDRANT_PORT=6333
-      - QDRANT_COLLECTION=${QDRANT_COLLECTION:-souli_chunks}
+      - QDRANT_COLLECTION=${QDRANT_COLLECTION:-souli_chunks_improved}
       - SOULI_LOG_LEVEL=DEBUG
       - TRANSFORMERS_VERBOSITY=error
     command: [ "streamlit", "run", "/app/souli_pipeline/streamlit_dev.py", "--server.port=8502", "--server.address=0.0.0.0" ]

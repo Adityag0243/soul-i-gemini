@@ -14,6 +14,8 @@ import uuid
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
+from sentence_transformers import SentenceTransformer
+
 
 from souli_pipeline.utils.logging import timed
 
@@ -78,13 +80,17 @@ def ensure_collection(
 # Embed helper
 # ---------------------------------------------------------------------------
 
-def _get_encoder(model_name: str = _DEFAULT_MODEL):
+def _get_encoder(model_name: str):
     if model_name not in _encoder_cache:
-        from sentence_transformers import SentenceTransformer
-        logger.info("Loading embedding model: %s", model_name)
-        _encoder_cache[model_name] = SentenceTransformer(model_name)
+        import os, sys
+        # tqdm stderr pipe fix for Streamlit
+        old_stderr = sys.stderr
+        sys.stderr = open(os.devnull, 'w')
+        try:
+            _encoder_cache[model_name] = SentenceTransformer(model_name)
+        finally:
+            sys.stderr = old_stderr
     return _encoder_cache[model_name]
-
 
 @timed("qdrant.embed_texts")
 def _embed_texts(texts: List[str], model_name: str = _DEFAULT_MODEL) -> List[List[float]]:

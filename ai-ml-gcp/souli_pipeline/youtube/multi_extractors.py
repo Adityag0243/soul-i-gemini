@@ -150,16 +150,40 @@ Your job is to extract healing principles from a coach's transcript.
 A healing principle is: a belief, truth, or inner shift the coach says
 resolves the person's energy blockage. It answers "what truth sets you free?"
 
-Examples of healing principles:
-- "You don't need to justify yourself to anyone."
-- "Energy must move to heal — stillness keeps you stuck."
-- "You were born worthy — worthiness is not earned."
+Examples of healing principles against different energy nodes:
+-"depleted_energy":[
+    1.  Become unapologetic about yourself. 
+    2.  Try crazy things in life and follow your dreams. 
+    3.  Find or create your space in all aspects of life. 
+    4.  Learn self-love, self-acceptance, and self-care. 
+    5.  Experience Joy, Energy, Every Day.
+]
+-"scattered_energy":[
+    1.   Take charge of your life, 
+    2.    set boundaries, and
+    3.    be unapologetic about it. 
+    4.    Learn self-love, 
+    5.    self-acceptance, and 
+    6.    self-care.
+]
+-"outofcontrol_energy":[
+    1.   Find balance, 
+    2.   restfulness, and ease in your life. 
+    3.   Find Letting Go, 
+    4.   Increase Acceptance, and 
+    5.   Gratitude.
+]
+-"normal_energy":[
+    1.   Look for spiritual progression by becoming your master on a mental and emotional level. 
+    2.   Build a vision of life and live for a purpose: 
+    3.   create value through your life.
+]
 
 Rules:
 - Extract ONLY complete, standalone principles. Not fragments.
-- Keep the coach's voice and language — do not paraphrase into generic wellness speak.
+- Try to keep the coach's voice and language — do not paraphrase into generic wellness speak if the coach has a unique way of expressing it.
 - If the coach says the same thing multiple times, extract it ONCE.
-- Minimum 15 words per principle, maximum 80 words.
+- Extract 3-6 full sentences per principle: name the problem, state the insight, show the outcome. Minimum 40 words, maximum 120 words. Never extract an isolated conclusion sentence without its reasoning.
 - Return ONLY valid JSON array, no other text.
 """
 
@@ -172,7 +196,7 @@ Transcript:
 \"\"\"
 
 Return a JSON array where each item has:
-- "text": the healing principle in the coach's words
+- "text": the healing principle in the coach's words in 3-6 sentences.
 - "problem_keywords": 3-5 comma-separated keywords describing what inner problem this resolves
 
 Example format:
@@ -193,7 +217,7 @@ def extract_healing_principles(
 ) -> List[Dict]:
     """Extract healing principles — truths the coach says resolve this energy pattern."""
     try:
-        user_prompt = _HEALING_USER.format(transcript=transcript[:5000])
+        user_prompt = _HEALING_USER.format(transcript=transcript[:8000])
         raw = _run_extractor_prompt(transcript, _HEALING_SYSTEM, user_prompt, ollama_model, ollama_endpoint)
         chunks = _parse_extractor_output(raw, "healing", energy_node)
         logger.info("[EXTRACTOR:healing] Extracted %d chunks.", len(chunks))
@@ -212,14 +236,16 @@ You are a content analyst for Souli, an inner wellness platform.
 Your job is to extract specific practices and activities from a coach's transcript.
 
 An activity is: a concrete, named practice the coach recommends — something
-the person can actually DO. It must have a name AND some instruction or description.
+the person can actually DO. It must have a name AND some instruction or description if possible try to find in what scenerios we need to do this activity.
+Also try to add what will happen if we do this activity for example if you do this activity you will feel more grounded, or you will release stuck energy or your left brain will activate and you will feel more clarity.
 
 Examples of activities:
-- "2-minute shaking practice: stand up, start shaking your hands and arms, let it travel to your whole body."
-- "OM meditation: sit quietly, close your eyes, chant OM for 5 minutes."
-- "Grounding body scan: lie down, breathe slowly, feel each part of your body touching the ground."
+- "2-minute shaking practice: stand up, start shaking your hands and arms, let it travel to your whole body. Do this until you feel a release of tension — usually around 2 minutes, it will recharge your energy and help you feel more grounded."
+- "OM meditation: sit quietly, close your eyes, chant OM for 5 minutes, feeling the vibration in your body. This calms scattered energy and brings you back to your center."
+- "Grounding body scan: lie down, breathe slowly, feel each part of your body touching the ground. This helps with depleted energy by connecting you to the earth and your physical presence."
 
 Rules:
+- Text must be less than 100 words — we want concise, actionable activities.
 - Only extract if the coach gives the name AND at least one sentence of instruction.
 - Do NOT extract vague mentions like "try meditation" with no detail.
 - Keep the coach's voice — do not invent instructions not in the transcript.
@@ -235,7 +261,7 @@ Transcript:
 \"\"\"
 
 Return a JSON array where each item has:
-- "text": the activity name + full instructions as the coach described
+- "text": the activity name + full instructions as the coach described + any details about when to do it and what it does
 - "problem_keywords": 3-5 comma-separated keywords for the energy state this helps
 
 Example format:
@@ -256,7 +282,7 @@ def extract_activities(
 ) -> List[Dict]:
     """Extract specific practices and activities the coach recommends."""
     try:
-        user_prompt = _ACTIVITIES_USER.format(transcript=transcript[:5000])
+        user_prompt = _ACTIVITIES_USER.format(transcript=transcript[:8000])
         raw = _run_extractor_prompt(transcript, _ACTIVITIES_SYSTEM, user_prompt, ollama_model, ollama_endpoint)
         chunks = _parse_extractor_output(raw, "activities", energy_node)
         logger.info("[EXTRACTOR:activities] Extracted %d chunks.", len(chunks))
@@ -274,18 +300,23 @@ _STORIES_SYSTEM = """\
 You are a content analyst for Souli, an inner wellness platform.
 Your job is to extract stories, metaphors, and signature phrases from a coach's transcript.
 
-What to extract:
-1. Real client stories — "I had a client who..." anecdotes (keep them short, anonymised)
-2. Metaphors — vivid comparisons the coach uses ("your energy is like a river that needs to flow")
-3. Signature phrases — memorable lines the coach repeats or emphasises
+What to extract — TWO types ONLY:
+1. Named stories or anecdotes: a real or illustrative narrative the coach 
+   tells. Must have a beginning, character, or event. Min 3 sentences.
+   Examples: the Avalokiteshvara story, client stories starting "I had a 
+   client who...", spiritual parables like Jesus on the cross.
 
-Why these matter: they make Souli's responses sound like the real coach,
-not a generic AI. These are the coach's voice captured exactly.
+2. Vivid metaphors: a comparison that gives the listener a physical 
+   image for an abstract concept. Must be self-contained in 1-2 sentences.
+   Example: "Think of your energy like a river. When dammed, it rots."
+
+Do NOT extract: general teaching statements,greetings, opening remarks, or conclusions without a narrative.
 
 Rules:
-- Keep the coach's EXACT words as much as possible — this is about voice, not summary.
-- For stories: extract the key narrative in 2-5 sentences maximum.
+- Keep the coach's EXACT words as much as possible — this is about voice, not summary at max 120 words per extract.
+- For stories: extract the key narrative in 2-6 sentences maximum.
 - For metaphors and phrases: keep them as spoken, verbatim.
+- Before returning review again and see if will it make sense to use as a RAG chunk in any phase of coaching — if not, do not extract.
 - Return ONLY valid JSON array, no other text.
 """
 
@@ -305,7 +336,7 @@ Example format:
 [
   {{"text": "Think of your energy like a river. When it flows, it heals everything around it. When it's dammed up, it becomes stagnant and starts to rot.", "problem_keywords": "blocked energy, flow, stuck"}},
   {{"text": "I had a client who hadn't cried in 10 years. She thought she was strong. She was just frozen.", "problem_keywords": "emotional closure, blocked energy, numbness"}}
-]
+] 
 
 If no stories or memorable phrases are found, return an empty array: []
 """
@@ -319,7 +350,7 @@ def extract_stories_and_phrases(
 ) -> List[Dict]:
     """Extract stories, metaphors and signature coach phrases."""
     try:
-        user_prompt = _STORIES_USER.format(transcript=transcript[:5000])
+        user_prompt = _STORIES_USER.format(transcript=transcript[:8000])
         raw = _run_extractor_prompt(transcript, _STORIES_SYSTEM, user_prompt, ollama_model, ollama_endpoint)
         chunks = _parse_extractor_output(raw, "stories", energy_node)
         logger.info("[EXTRACTOR:stories] Extracted %d chunks.", len(chunks))
@@ -383,7 +414,7 @@ def extract_commitment_prompts(
 ) -> List[Dict]:
     """Extract readiness challenges and commitment questions the coach poses."""
     try:
-        user_prompt = _COMMITMENT_USER.format(transcript=transcript[:5000])
+        user_prompt = _COMMITMENT_USER.format(transcript=transcript[:8000])
         raw = _run_extractor_prompt(transcript, _COMMITMENT_SYSTEM, user_prompt, ollama_model, ollama_endpoint)
         chunks = _parse_extractor_output(raw, "commitment", energy_node)
         logger.info("[EXTRACTOR:commitment] Extracted %d chunks.", len(chunks))
@@ -417,6 +448,8 @@ Rules:
 - Keep the coach's vocabulary and framing — this trains Souli to speak his language.
 - Minimum 30 words per pattern description.
 - Return ONLY valid JSON array, no other text.
+- A pattern description focuses on: what the stuck state LOOKS LIKE in daily life, what DRIVES it, and how a person would RECOGNISE it in themselves. It is NOT a healing principle (which explains the way out) and NOT a story (which is a narrative). If a passage serves as a story AND illustrates a pattern, classify it as a story — not a pattern.
+
 """
 
 _PATTERNS_USER = """\
@@ -449,7 +482,7 @@ def extract_problem_patterns(
 ) -> List[Dict]:
     """Extract how the coach describes and names this energy problem pattern."""
     try:
-        user_prompt = _PATTERNS_USER.format(transcript=transcript[:5000])
+        user_prompt = _PATTERNS_USER.format(transcript=transcript[:8000])
         raw = _run_extractor_prompt(transcript, _PATTERNS_SYSTEM, user_prompt, ollama_model, ollama_endpoint)
         chunks = _parse_extractor_output(raw, "patterns", energy_node)
         logger.info("[EXTRACTOR:patterns] Extracted %d chunks.", len(chunks))

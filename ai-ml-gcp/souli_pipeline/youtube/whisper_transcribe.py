@@ -42,15 +42,29 @@ def _download_audio(url: str, out_path: str) -> bool:
     Download best audio track from YouTube URL to out_path.
     Returns True on success.
     """
+    # Cookies file path — set via env var or default location
+    cookies_path = os.environ.get("YT_COOKIES_PATH", "/app/yt_cookies.txt")
+
+    cmd = [
+        "yt-dlp",
+        "--js-runtimes", "node",  
+        "--remote-components", "ejs:github",
+        "-f", "bestaudio/best",
+        "--no-playlist",
+        "-o", out_path,
+        url,
+    ]
+
+    # Auto-attach cookies if file exists
+    if os.path.exists(cookies_path):
+        cmd += ["--cookies", cookies_path]
+        logger.info("Using cookies from: %s", cookies_path)
+    else:
+        logger.warning("No cookies file found at %s — may fail on server IPs", cookies_path)
+
     try:
         result = subprocess.run(
-            [
-                "yt-dlp",
-                "-f", "bestaudio/best",
-                "--no-playlist",
-                "-o", out_path,
-                url,
-            ],
+            cmd,
             capture_output=True,
             text=True,
             timeout=300,
@@ -62,7 +76,6 @@ def _download_audio(url: str, out_path: str) -> bool:
     except Exception as e:
         logger.warning("Audio download error: %s", e)
         return False
-
 
 def transcribe_url(
     url: str,

@@ -104,6 +104,7 @@ conversation:
   rag_top_k: 3
   max_intake_turns: 4
   temperature: 0.75
+  use_multi_collections: true    
 
 multi_ingestion:
   # General semantic collection (shared with improved pipeline)

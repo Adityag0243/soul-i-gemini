@@ -514,6 +514,49 @@ def show():
             help="Produce extraction files only — don't write to Qdrant",
             key="multi_skip_ingest",
         )
+    # ── YouTube Cookies ───────────────────────────────────────────────────────
+    st.markdown("### 🍪 YouTube Cookies")
+
+    COOKIES_PATH = "/app/yt_cookies.txt"
+    cookies_exist = os.path.exists(COOKIES_PATH)
+
+    col_ck1, col_ck2 = st.columns([3, 1])
+    with col_ck1:
+        if cookies_exist:
+            mtime = os.path.getmtime(COOKIES_PATH)
+            import datetime
+            updated = datetime.datetime.fromtimestamp(mtime).strftime("%d %b %Y, %I:%M %p")
+            st.success(f"✅ Cookies active — last updated: {updated}")
+        else:
+            st.warning("⚠️ No cookies file found. YouTube downloads will likely fail on server IPs.")
+
+    with col_ck2:
+        if cookies_exist:
+            if st.button("🗑 Remove Cookies", key="remove_cookies"):
+                os.remove(COOKIES_PATH)
+                st.rerun()
+
+    cookies_file = st.file_uploader(
+        "Upload cookies.txt (exported from your browser)",
+        type=["txt"],
+        key="yt_cookies_upload",
+        help="Export from Chrome/Firefox using the 'Get cookies.txt LOCALLY' extension",
+    )
+    if cookies_file is not None:
+        with open(COOKIES_PATH, "wb") as f:
+            f.write(cookies_file.read())
+        st.success("✅ Cookies saved! Will be used for all YouTube downloads.")
+        st.rerun()
+
+    with st.expander("ℹ️ How to export cookies from browser", expanded=False):
+        st.markdown("""
+        1. Install **[Get cookies.txt LOCALLY](https://chrome.google.com/webstore/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc)** extension in Chrome
+        2. Open **YouTube** and make sure you're **logged in**
+        3. Click the extension icon → select **Export** → save as `cookies.txt`
+        4. Upload that file here ☝️
+        
+        **How long do cookies last?** ~2-4 weeks if you stay logged into YouTube.
+        """)
 
     # ── CSV Upload ────────────────────────────────────────────────────────
     st.markdown("### Upload CSV")

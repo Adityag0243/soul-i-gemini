@@ -328,7 +328,33 @@ def run_multi_ingestion_pipeline(
         ollama_endpoint=c.ollama_endpoint,
     )
 
-    # Save each extractor's output to its own Excel file for inspection
+    # ── Re-tag each extracted chunk with energy_tagger (Qwen) ──────────────
+    # The extractor stamped all chunks with one fixed detected_node.
+    # We now run each chunk's text through energy_tagger so every chunk
+    # gets its own accurate node based on its actual content.
+    try:
+        from souli_pipeline.youtube.energy_tagger import tag_chunk
+        logger.info("[MULTI] Re-tagging extracted chunks with Qwen energy_tagger...")
+        for chunk_type, chunks in extractor_outputs.items():
+            for chunk in chunks:
+                text = chunk.get("text", "").strip()
+                if text:
+                    result = tag_chunk(
+                        text,
+                        ollama_model=c.tagger_model,
+                        ollama_endpoint=c.ollama_endpoint,
+                    )
+                    chunk["energy_node"] = result["energy_node"]
+                    chunk["energy_node_reason"] = result["reason"]
+        logger.info("[MULTI] Re-tagging done.")
+    except Exception as exc:
+        logger.warning("[MULTI] Re-tagging failed (%s) — keeping extractor-assigned nodes.", exc)
+    
+    for chunk_type, chunks in extractor_outputs.items():
+        for chunk in chunks:
+            chunk["source_video"] = source_label or youtube_url
+            chunk["youtube_url"]  = youtube_url
+            
     extractor_excels: Dict[str, str] = {}
     for chunk_type, chunks in extractor_outputs.items():
         if chunks:
@@ -339,8 +365,7 @@ def run_multi_ingestion_pipeline(
             outputs[f"extracted_{chunk_type}"] = ext_path
             logger.info("[MULTI] Saved %d %s chunks → %s", len(chunks), chunk_type, ext_path)
         else:
-            logger.info("[MULTI] No %s chunks extracted (skipped or empty).", chunk_type)
-
+            logger.info("[MULTI] No %s chunks extracted (skipped or empty).")
     # ------------------------------------------------------------------
     # Step 8 — Typed collection ingest  (NEW)
     # ------------------------------------------------------------------
@@ -349,12 +374,6 @@ def run_multi_ingestion_pipeline(
     if not skip_ingest:
         logger.info("[MULTI] Step 8/8 — Typed collection ingest...")
         from souli_pipeline.retrieval.qdrant_store_multi import ingest_all_extractor_outputs
-
-        # Attach source metadata to all extractor chunks before ingesting
-        for chunk_type, chunks in extractor_outputs.items():
-            for chunk in chunks:
-                chunk["source_video"] = source_label or youtube_url
-                chunk["youtube_url"]  = youtube_url
 
         typed_counts = ingest_all_extractor_outputs(
             extractor_outputs=extractor_outputs,

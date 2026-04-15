@@ -4,6 +4,9 @@
 # Use docker-compose.aws.yml (default) or docker-compose.gcp.yml
 # ─────────────────────────────────────────────────────────────────────────────
 FROM nvidia/cuda:12.8.0-runtime-ubuntu22.04
+
+RUN rm -f /etc/apt/sources.list.d/cuda*.list
+
 # System deps + Python 3.11
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3.11 \
@@ -13,6 +16,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     curl \
     mpg123 \
+    nodejs \
     && ln -sf /usr/bin/python3.11 /usr/bin/python3 \
     && ln -sf /usr/bin/python3.11 /usr/bin/python \
     && rm -rf /var/lib/apt/lists/*
