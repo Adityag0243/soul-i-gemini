@@ -1,7 +1,14 @@
 import crypto from 'crypto';
 import argon2 from 'argon2';
 import { OAuth2Client } from 'google-auth-library';
-import { AuthProvider, RoleCode, User } from '@prisma/client';
+import {
+    AuthProvider,
+    PaymentProvider,
+    Prisma,
+    RoleCode,
+    SubscriptionStatus,
+    User,
+} from '@prisma/client';
 import { prisma } from '../../../database';
 import { googleConfig } from '../../../config';
 import {
@@ -9,9 +16,13 @@ import {
     AuthFailureError,
     InternalError,
 } from '../../../core/api-error';
-import { createTokens } from '../../../core/auth-utils';
+import { createTokens, validateTokenData } from '../../../core/auth-utils';
+import JWT from '../../../core/jwt-utils';
 import AuthIdentityRepo from '../repositories/auth-identity.repo';
 import AuthTokenRepo from '../repositories/auth-token.repo';
+import { subscriptionRepository } from '../../../database/repositories/subscription.repo';
+import stripeGateway from '../../../infrastructure/paymentGateways/stripe.gateway';
+import razorpayGateway from '../../../infrastructure/paymentGateways/razorpay.gateway';
 import logger from '../../../core/logger';
 import { passwordResetEmailService } from '../../../infrastructure/email/password-reset-email.service';
 import {
@@ -29,18 +40,20 @@ import {
     ForgotPasswordRequestInput,
     ForgotPasswordVerifyInput,
     ForgotPasswordResetInput,
+    ResetJourneyInput,
+    EraseAllDataInput,
 } from '../schemas/auth.schema';
 import { TokenType } from '@prisma/client';
 
 // Google OAuth client
 const googleClient = new OAuth2Client(googleConfig.clientId);
 
-// Generate a random Souli Key (12 characters for anonymous access)
+// Generate a random Souli Key (6 characters for anonymous access)
 function generateSouliKey(): string {
     return crypto.randomBytes(24).toString('base64url').slice(0, 6);
 }
 
-// Generate access and refresh token keys
+// generate access and refresh token keys
 function generateTokenKeys(): {
     accessTokenKey: string;
     refreshTokenKey: string;
@@ -61,7 +74,7 @@ async function hashPassword(password: string): Promise<string> {
     });
 }
 
-// Verify password using Argon2
+// verify password using Argon2
 async function verifyPassword(
     password: string,
     hash: string,
@@ -105,6 +118,117 @@ function generateResetOtp(): string {
 
 function generateResetSessionToken(): string {
     return crypto.randomBytes(32).toString('base64url');
+}
+
+type DeletedJourneyCounts = {
+    chatMessages: number;
+    chatSessions: number;
+    emotionalStates: number;
+    dailyCheckins: number;
+    practiceFeedbacks: number;
+    crisisEvents: number;
+    analyticsEvents: number;
+    referrals: number;
+};
+
+async function cancelActiveSubscription(userId: number): Promise<void> {
+    const activeSubscription =
+        await subscriptionRepository.getActiveSubscriptionByUserId(userId);
+
+    if (
+        !activeSubscription ||
+        !activeSubscription.provider ||
+        !activeSubscription.providerSubscriptionId
+    ) {
+        return;
+    }
+
+    if (activeSubscription.provider === PaymentProvider.STRIPE) {
+        await stripeGateway.cancelSubscription(
+            activeSubscription.providerSubscriptionId,
+        );
+    } else if (activeSubscription.provider === PaymentProvider.RAZORPAY) {
+        await razorpayGateway.cancelSubscription(
+            activeSubscription.providerSubscriptionId,
+            { cancel_at_cycle_end: false },
+        );
+    }
+
+    await subscriptionRepository.updateSubscriptionStatus(
+        activeSubscription.id,
+        SubscriptionStatus.CANCELED,
+    );
+}
+
+async function deleteJourneyDataWithTx(
+    tx: Prisma.TransactionClient,
+    userId: number,
+): Promise<DeletedJourneyCounts> {
+    const sessions = await tx.chatSession.findMany({
+        where: { userId },
+        select: { id: true },
+    });
+
+    const sessionIds = sessions.map((session) => session.id);
+
+    const [
+        messagesDeleted,
+        sessionsDeleted,
+        emotionalStatesDeleted,
+        dailyCheckinsDeleted,
+        practiceFeedbacksDeleted,
+        crisisEventsDeleted,
+        analyticsEventsDeleted,
+        referralsDeleted,
+    ] = await Promise.all([
+        sessionIds.length
+            ? tx.chatMessage.deleteMany({
+                  where: { sessionId: { in: sessionIds } },
+              })
+            : Promise.resolve({ count: 0 }),
+        tx.chatSession.deleteMany({
+            where: { userId },
+        }),
+        tx.emotionalState.deleteMany({
+            where: { userId },
+        }),
+        tx.dailyCheckin.deleteMany({
+            where: { userId },
+        }),
+        tx.practiceFeedback.deleteMany({
+            where: { userId },
+        }),
+        tx.crisisEvent.deleteMany({
+            where: { userId },
+        }),
+        tx.analyticsEvent.deleteMany({
+            where: { userId },
+        }),
+        tx.referral.deleteMany({
+            where: {
+                OR: [{ referrerUserId: userId }, { referredUserId: userId }],
+            },
+        }),
+    ]);
+
+    return {
+        chatMessages: messagesDeleted.count,
+        chatSessions: sessionsDeleted.count,
+        emotionalStates: emotionalStatesDeleted.count,
+        dailyCheckins: dailyCheckinsDeleted.count,
+        practiceFeedbacks: practiceFeedbacksDeleted.count,
+        crisisEvents: crisisEventsDeleted.count,
+        analyticsEvents: analyticsEventsDeleted.count,
+        referrals: referralsDeleted.count,
+    };
+}
+
+async function deleteJourneyData(
+    userId: number,
+): Promise<DeletedJourneyCounts> {
+    return prisma.$transaction(async (tx) =>
+        deleteJourneyDataWithTx(tx, userId),
+    );
 }
 
 // verify google id token and extract user info
@@ -178,7 +302,7 @@ async function createUserWithSession(
     }
 
     const result = await prisma.$transaction(async (tx) => {
-        // Create user
+        // create user
         const user = await tx.user.create({
             data: {
                 name: userData.name ?? null,
@@ -188,7 +312,7 @@ async function createUserWithSession(
             },
         });
 
-        // Create user-role relation
+        // create user-role relation
         await tx.userRoleRelation.create({
             data: {
                 userId: user.id,
@@ -196,7 +320,7 @@ async function createUserWithSession(
             },
         });
 
-        // Create keystore
+        // create keystore
         await tx.keystore.create({
             data: {
                 clientId: user.id,
@@ -205,7 +329,7 @@ async function createUserWithSession(
             },
         });
 
-        // Get user with roles
+        // get user with roles
         const userWithRoles = await tx.user.findUnique({
             where: { id: user.id },
             include: {
@@ -234,7 +358,7 @@ async function createUserWithSession(
     return result;
 }
 
-// Create keystore session for existing user
+// create keystore session for existing user
 
 async function createSession(
     userId: number,
@@ -255,7 +379,7 @@ async function createSession(
     };
 }
 
-// AUTH SERVICE METHODS
+// auth service with methods for registration, login, and session management
 
 // register user with email and password
 
@@ -281,16 +405,14 @@ export async function registerWithEmail(
         throw new BadRequestError('User already registered with this email');
     }
 
-    // Hash password
     const passwordHash = await hashPassword(password);
-    // Create user with session
     const { user, keystore } = await createUserWithSession({
         name,
         email,
         verified: false,
     });
 
-    // Create auth identity
+    // create auth identity
     await AuthIdentityRepo.create({
         userId: user.id,
         provider: AuthProvider.EMAIL,
@@ -299,7 +421,7 @@ export async function registerWithEmail(
         emailVerified: false,
     });
 
-    // Generate tokens
+    // generate tokens
     const tokens = await createTokens(
         user,
         keystore.primaryKey,
@@ -312,7 +434,7 @@ export async function registerWithEmail(
     };
 }
 
-// Login with email and password
+// login with email and password
 
 export async function loginWithEmail(
     input: EmailLoginInput,
@@ -373,17 +495,15 @@ export async function loginWithEmail(
     };
 }
 
-// Login/Register with Google
+// login/register with Google
 
 export async function loginWithGoogle(
     input: GoogleLoginInput,
 ): Promise<AuthResponseDto> {
     const { idToken } = input;
 
-    // verify Google token
     const googleUser = await verifyGoogleToken(idToken);
 
-    // check if user exists with this Google account
     let identity = await AuthIdentityRepo.findByProviderAndAccountId(
         AuthProvider.GOOGLE,
         googleUser.sub,
@@ -393,7 +513,6 @@ export async function loginWithGoogle(
     let keystore: { primaryKey: string; secondaryKey: string };
 
     if (identity) {
-        // existing user - login
         const existingUser = await prisma.user.findUnique({
             where: { id: identity.userId },
             include: {
@@ -437,7 +556,6 @@ export async function loginWithGoogle(
         });
     }
 
-    // generate tokens
     const tokens = await createTokens(
         user,
         keystore.primaryKey,
@@ -455,17 +573,16 @@ export async function loginWithGoogle(
 export async function loginAnonymous(
     input: AnonymousLoginInput,
 ): Promise<AnonymousAuthResponseDto> {
-    // Generate unique Souli Key
     const souliKey = generateSouliKey();
     const souliKeyHash = await hashPassword(souliKey);
 
-    // Create user with session
+    // create user with session
     const { user, keystore } = await createUserWithSession({
         name: input.name ?? undefined,
         verified: false,
     });
 
-    // Create auth identity
+    // create auth identity
     await AuthIdentityRepo.create({
         userId: user.id,
         provider: AuthProvider.ANONYMOUS,
@@ -484,6 +601,54 @@ export async function loginAnonymous(
         tokens,
         souliKey, // Return only once - user must save this!
     };
+}
+
+export async function refreshTokenPair(
+    accessToken: string,
+    refreshToken: string,
+): Promise<{ accessToken: string; refreshToken: string }> {
+    const accessTokenPayload = await JWT.decode(accessToken);
+    validateTokenData(accessTokenPayload);
+
+    const userId = parseInt(accessTokenPayload.sub, 10);
+    if (isNaN(userId)) {
+        throw new AuthFailureError('Invalid user ID in token');
+    }
+
+    const user = await prisma.user.findUnique({
+        where: { id: userId },
+    });
+
+    if (!user || !user.status) {
+        throw new AuthFailureError('User not registered');
+    }
+
+    const refreshTokenPayload = await JWT.validate(refreshToken);
+    validateTokenData(refreshTokenPayload);
+
+    if (accessTokenPayload.sub !== refreshTokenPayload.sub) {
+        throw new AuthFailureError('Invalid access token');
+    }
+
+    const keystore = await prisma.keystore.findFirst({
+        where: {
+            clientId: user.id,
+            primaryKey: accessTokenPayload.prm,
+            secondaryKey: refreshTokenPayload.prm,
+        },
+    });
+
+    if (!keystore) {
+        throw new AuthFailureError('Invalid access token');
+    }
+
+    await prisma.keystore.delete({
+        where: { id: keystore.id },
+    });
+
+    const newSession = await createSession(user.id);
+
+    return createTokens(user, newSession.primaryKey, newSession.secondaryKey);
 }
 
 export async function requestPasswordResetOtp(
@@ -525,7 +690,7 @@ export async function requestPasswordResetOtp(
     const otp = generateResetOtp();
     const tokenHash = hashResetOtp(user.id, normalizedEmail, otp);
     const expiresAt = new Date(
-        Date.now() + PASSWORD_RESET_OTP_EXPIRY_MINUTES * 60 * 1000,
+        Date.now() + PASSWORD_RESET_OTP_EXPIRY_MINUTES * 60 * 1000, // 10 minutes
     );
 
     await AuthTokenRepo.create({
@@ -667,16 +832,15 @@ export async function resetPassword(
     };
 }
 
-/**
- * Restore anonymous session using Souli Key
- */
+// restore anonymous session using Souli Key
+
 export async function restoreWithSouliKey(
     input: SouliKeyRestoreInput,
 ): Promise<AuthResponseDto> {
     const { souliKey } = input;
 
-    // Find all anonymous identities and verify against each
-    // This is necessary because we can't search by hash directly
+    // find all anonymous identities and verify against each
+    // this is necessary because humlog directly hash se search nehi karsakte
     const identities = await prisma.authIdentity.findMany({
         where: {
             provider: AuthProvider.ANONYMOUS,
@@ -702,7 +866,7 @@ export async function restoreWithSouliKey(
         throw new AuthFailureError('Invalid Souli Key');
     }
 
-    // Get user with roles
+    // get user with roles
     const user = await prisma.user.findUnique({
         where: { id: matchedIdentity.userId },
         include: {
@@ -723,10 +887,10 @@ export async function restoreWithSouliKey(
         throw new AuthFailureError('User account is disabled');
     }
 
-    // Create new session
+    // create new session
     const keystore = await createSession(user.id);
 
-    // Generate tokens
+    // generate tokens
     const tokens = await createTokens(
         user,
         keystore.primaryKey,
@@ -739,14 +903,12 @@ export async function restoreWithSouliKey(
     };
 }
 
-/**
- * Link Google account to existing user
- */
+// link Google account to existing user
+
 export async function linkGoogleAccount(
     userId: number,
     idToken: string,
 ): Promise<void> {
-    // Verify Google token
     const googleUser = await verifyGoogleToken(idToken);
 
     // Check if this Google account is already linked to another user
@@ -766,7 +928,7 @@ export async function linkGoogleAccount(
         );
     }
 
-    // Check if user already has Google linked
+    // check if user already has Google linked
     const hasGoogle = await AuthIdentityRepo.hasProvider(
         userId,
         AuthProvider.GOOGLE,
@@ -775,7 +937,7 @@ export async function linkGoogleAccount(
         throw new BadRequestError('You already have a Google account linked');
     }
 
-    // Link the provider
+    // link the provider
     await AuthIdentityRepo.linkProvider(userId, {
         provider: AuthProvider.GOOGLE,
         email: googleUser.email,
@@ -784,9 +946,7 @@ export async function linkGoogleAccount(
     });
 }
 
-/**
- * Get linked providers for a user
- */
+// get linked providers for a user
 export async function getLinkedProviders(userId: number) {
     const identities = await AuthIdentityRepo.findByUserId(userId);
 
@@ -800,15 +960,60 @@ export async function getLinkedProviders(userId: number) {
     };
 }
 
+export async function resetJourney(
+    userId: number,
+    _input: ResetJourneyInput,
+): Promise<{ message: string; deletedCounts: DeletedJourneyCounts }> {
+    const deletedCounts = await deleteJourneyData(userId);
+
+    return {
+        message: 'Journey reset successfully',
+        deletedCounts,
+    };
+}
+
+export async function eraseAllData(
+    userId: number,
+    _input: EraseAllDataInput,
+): Promise<{ message: string; deletedCounts: DeletedJourneyCounts }> {
+    await cancelActiveSubscription(userId);
+
+    const deletedCounts = await prisma.$transaction(async (tx) => {
+        const journeyCounts = await deleteJourneyDataWithTx(tx, userId);
+
+        await tx.keystore.deleteMany({
+            where: { clientId: userId },
+        });
+
+        await tx.authToken.deleteMany({
+            where: { userId },
+        });
+
+        await tx.user.delete({
+            where: { id: userId },
+        });
+
+        return journeyCounts;
+    });
+
+    return {
+        message: 'Account and data erased successfully',
+        deletedCounts,
+    };
+}
+
 export default {
     registerWithEmail,
     loginWithEmail,
     loginWithGoogle,
     loginAnonymous,
+    refreshTokenPair,
     requestPasswordResetOtp,
     verifyPasswordResetOtp,
     resetPassword,
     restoreWithSouliKey,
     linkGoogleAccount,
     getLinkedProviders,
+    resetJourney,
+    eraseAllData,
 };

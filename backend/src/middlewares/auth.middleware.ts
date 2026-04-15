@@ -1,7 +1,8 @@
 import { Router } from 'express';
+import z from 'zod';
 import { ValidationSource } from '../helpers/validator';
+import { ZodAuthBearer, ZodCookies } from '../helpers/validator';
 import { validator } from './validator.middleware';
-import schema from '../routes/auth/schema';
 import { ProtectedRequest } from '../types/app-requests';
 import { asyncHandler } from '../core/async-handler';
 import { getAccessToken, validateTokenData } from '../core/auth-utils';
@@ -16,8 +17,25 @@ import keystoreRepo from '../database/repositories/keystore.repo';
 
 const router = Router();
 
+const authRequestSchema = z
+    .object({
+        headers: z.object({
+            authorization: ZodAuthBearer.optional(),
+        }),
+        cookies: ZodCookies.optional(),
+    })
+    .refine(
+        (data) =>
+            Boolean(data.headers.authorization) ||
+            Boolean(data.cookies?.accessToken),
+        {
+            message:
+                'Token is required either in Authorization header or in cookies',
+        },
+    );
+
 export default router.use(
-    validator(schema.auth, ValidationSource.REQUEST),
+    validator(authRequestSchema, ValidationSource.REQUEST),
     asyncHandler(async (req: ProtectedRequest, _res, next) => {
         req.accessToken = getAccessToken(req);
 

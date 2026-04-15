@@ -4,7 +4,7 @@ import fs from 'fs';
 import path from 'path';
 
 dotenv.config();
-//read the pem key: prefer env var, fallback to keys file
+
 function readKey(envVar: string, filename: string): string {
     const envValue = process.env[envVar];
     if (envValue) return envValue;
@@ -17,19 +17,22 @@ function readKey(envVar: string, filename: string): string {
 export const originUrl = process.env.ORIGIN_URL;
 export const isProduction = process.env.NODE_ENV === 'production';
 export const timeZone = process.env.TZ;
-export const port = process.env.PORT;
+export const port = parseInt(process.env.PORT || '5000', 10);
 
 //the main serveing url : abhi deployed wala use mai hai
 export const serverUrl = process.env.SERVER_URL
     ? 'https://souli.onrender.com'
     : process.env.SERVER_URL;
+
 //token configuration
 export const tokenInfo = {
     accessTokenValidity: parseInt(
         process.env.ACCESS_TOKEN_VALIDITY_SEC || '900',
+        10,
     ), // 15 minutes default
     refreshTokenValidity: parseInt(
         process.env.REFRESH_TOKEN_VALIDITY_SEC || '2592000', // 30 days default
+        10,
     ),
     issuer: process.env.TOKEN_ISSUER || '',
     audience: process.env.TOKEN_AUDIENCE || '',
@@ -38,14 +41,15 @@ export const tokenInfo = {
 };
 
 // cookie options
-const cookieMaxAgeSeconds = Number(process.env.COOKIE_MAX_AGE_SEC ?? 3600000);
+// const cookieMaxAgeSeconds = Number(process.env.COOKIE_MAX_AGE_SEC ?? 3600000);
+const cookieMaxAgeMs = Number(process.env.COOKIE_MAX_AGE_SEC ?? 604800) * 1000;
 const cookieDomain = process.env.COOKIE_DOMAIN;
 
 export const cookieOptions: CookieOptions = {
     httpOnly: true,
     secure: isProduction,
     sameSite: isProduction ? ('none' as const) : ('strict' as const),
-    maxAge: cookieMaxAgeSeconds * 1000,
+    maxAge: cookieMaxAgeMs,
     domain: isProduction ? cookieDomain : undefined,
     path: '/',
 };
@@ -103,7 +107,7 @@ export const paymentConfig = {
     stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET || '',
     razorpayWebhookSecret: process.env.RAZORPAY_WEBHOOK_SECRET || '',
 
-    // Subscription reminders (in days before expiry)
+    // subscription reminders - in days before expiry
     subscriptionReminderDays: parseInt(
         process.env.SUBSCRIPTION_REMINDER_DAYS || '7',
     ),

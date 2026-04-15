@@ -1,8 +1,7 @@
 import { Router, RequestHandler } from 'express';
 import healthRoutes from './health/index';
-import { apiKeyMiddleware } from './auth/api-key';
+import { apiKeyMiddleware } from '../middlewares/api-key.middleware';
 import permission from '../middlewares/permission.middleware';
-// import authRoutes from './auth';
 import { authRoutes as authModuleRoutes } from '../modules/auth';
 import { chatRoutes } from '../modules/chat';
 import { voiceRoutes } from '../modules/voice';
@@ -20,9 +19,6 @@ router.use('/health', healthRoutes);
 router.use(apiKeyMiddleware);
 
 router.use(permission(Permission.GENERAL) as RequestHandler);
-
-// legacy auth routes
-// router.use('/auth', authRoutes);
 
 // modular auth routes
 router.use('/auth', authModuleRoutes);

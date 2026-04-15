@@ -9,16 +9,50 @@ import {
     emailLoginSchema,
     googleLoginSchema,
     anonymousLoginSchema,
+    authRequestSchema,
+    refreshTokenSchema,
     souliKeyRestoreSchema,
     forgotPasswordRequestSchema,
     forgotPasswordVerifySchema,
     forgotPasswordResetSchema,
+    resetJourneySchema,
+    eraseAllDataSchema,
 } from '../schemas/auth.schema';
 import * as AuthController from '../controllers/auth.controller';
 
 const router = Router();
 
 //swagger documentation
+
+registry.registerPath({
+    method: 'post',
+    path: '/auth/token/refresh',
+    summary: 'Refresh tokens',
+    description:
+        'Issue new access and refresh tokens. Send refresh token in body or cookies and provide access token in Authorization header or cookies.',
+    tags: ['Auth'],
+    security: [{ apiKey: [] }],
+    request: {
+        body: {
+            content: {
+                'application/json': {
+                    schema: refreshTokenSchema,
+                },
+            },
+        },
+    },
+    responses: {
+        200: {
+            description: 'New tokens issued',
+        },
+        401: {
+            description: 'Invalid or expired tokens',
+        },
+        403: {
+            description: 'Missing or invalid API key',
+        },
+    },
+});
 
 registry.registerPath({
     method: 'post',
@@ -173,6 +207,56 @@ registry.registerPath({
 
 registry.registerPath({
     method: 'post',
+    path: '/auth/privacy/reset-journey',
+    summary: 'Reset Journey',
+    description:
+        'Delete chat, emotional, crisis, feedback, and analytics data while keeping the account active.',
+    tags: ['Auth - Privacy'],
+    security: [{ apiKey: [], bearerAuth: [] }],
+    request: {
+        body: {
+            content: {
+                'application/json': {
+                    schema: resetJourneySchema,
+                },
+            },
+        },
+    },
+    responses: {
+        200: { description: 'Journey reset successfully' },
+        400: { description: 'Validation error' },
+        401: { description: 'Authentication required' },
+        403: { description: 'Missing or invalid API key' },
+    },
+});
+
+registry.registerPath({
+    method: 'delete',
+    path: '/auth/privacy/erase-all',
+    summary: 'Erase All Data',
+    description:
+        'Cancel active subscriptions, revoke sessions, and permanently delete the account and linked data.',
+    tags: ['Auth - Privacy'],
+    security: [{ apiKey: [], bearerAuth: [] }],
+    request: {
+        body: {
+            content: {
+                'application/json': {
+                    schema: eraseAllDataSchema,
+                },
+            },
+        },
+    },
+    responses: {
+        200: { description: 'Account and data erased successfully' },
+        400: { description: 'Validation error' },
+        401: { description: 'Authentication required' },
+        403: { description: 'Missing or invalid API key' },
+    },
+});
+
+registry.registerPath({
+    method: 'post',
     path: '/auth/password/forgot',
     summary: 'Request Forgot Password OTP',
     description:
@@ -275,6 +359,14 @@ router.post(
     asyncHandler(AuthController.anonymousLogin),
 );
 
+// refresh token pair
+router.post(
+    '/token/refresh',
+    validator(authRequestSchema, ValidationSource.REQUEST),
+    validator(refreshTokenSchema, ValidationSource.REQUEST),
+    asyncHandler(AuthController.refreshTokens),
+);
+
 // restore with souli key
 router.post(
     '/restore',
@@ -294,6 +386,20 @@ router.get(
     '/providers',
     authMiddleware as unknown as RequestHandler,
     asyncHandler(AuthController.getProviders),
+);
+
+router.post(
+    '/privacy/reset-journey',
+    authMiddleware as unknown as RequestHandler,
+    validator(resetJourneySchema, ValidationSource.BODY),
+    asyncHandler(AuthController.resetJourney),
+);
+
+router.delete(
+    '/privacy/erase-all',
+    authMiddleware as unknown as RequestHandler,
+    validator(eraseAllDataSchema, ValidationSource.BODY),
+    asyncHandler(AuthController.eraseAllData),
 );
 
 router.post(

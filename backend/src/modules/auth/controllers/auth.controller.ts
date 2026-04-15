@@ -2,8 +2,11 @@ import { Request, Response } from 'express';
 import {
     SuccessResponse,
     SuccessCreatedResponse,
+    TokenRefreshResponse,
 } from '../../../core/api-response';
+import { clearCookies } from '../../../core/cookie-utils';
 import { setCookies } from '../../../core/cookie-utils';
+import { getAccessToken, getRefreshToken } from '../../../core/auth-utils';
 import { ProtectedRequest } from '../../../types/app-requests';
 import AuthService from '../services/auth.service';
 import {
@@ -15,6 +18,8 @@ import {
     ForgotPasswordRequestInput,
     ForgotPasswordVerifyInput,
     ForgotPasswordResetInput,
+    ResetJourneyInput,
+    EraseAllDataInput,
 } from '../schemas/auth.schema';
 
 //register with email and password
@@ -25,7 +30,6 @@ export async function emailRegister(
     res: Response,
 ): Promise<void> {
     const result = await AuthService.registerWithEmail(req.body);
-
     // set cookies for web clients
     setCookies(res, result.tokens);
 
@@ -90,6 +94,30 @@ export async function anonymousLogin(
     }).send(res);
 }
 
+// refresh auth tokens
+// POST /auth/token/refresh
+
+export async function refreshTokens(
+    req: ProtectedRequest,
+    res: Response,
+): Promise<void> {
+    const accessToken = getAccessToken(req);
+    const refreshToken = getRefreshToken(req);
+
+    const tokens = await AuthService.refreshTokenPair(
+        accessToken,
+        refreshToken,
+    );
+
+    setCookies(res, tokens);
+
+    new TokenRefreshResponse(
+        'Token Issued',
+        tokens.accessToken,
+        tokens.refreshToken,
+    ).send(res);
+}
+
 // restore session with Souli Key
 // POST /auth/restore
 
@@ -131,6 +159,35 @@ export async function getProviders(
     const result = await AuthService.getLinkedProviders(req.user.id);
 
     new SuccessResponse('Providers retrieved', result).send(res);
+}
+
+// reset journey for current user
+// POST /auth/privacy/reset-journey
+
+export async function resetJourney(
+    req: ProtectedRequest,
+    res: Response,
+): Promise<void> {
+    const input = req.body as ResetJourneyInput;
+    const result = await AuthService.resetJourney(req.user.id, input);
+
+    new SuccessResponse('Journey reset successfully', result).send(res);
+}
+
+// erase all data for current user
+// DELETE /auth/privacy/erase-all
+
+export async function eraseAllData(
+    req: ProtectedRequest,
+    res: Response,
+): Promise<void> {
+    const input = req.body as EraseAllDataInput;
+    const result = await AuthService.eraseAllData(req.user.id, input);
+
+    clearCookies(res);
+    new SuccessResponse('Account and data erased successfully', result).send(
+        res,
+    );
 }
 
 // request password reset OTP

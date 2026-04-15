@@ -243,9 +243,8 @@ function detectCrisisLevel(content: string): CrisisLevel {
     return CrisisLevel.NONE;
 }
 
-/**
- * Detect primary emotion from content
- */
+// Detect primary emotion from content
+
 function detectEmotion(content: string): string | undefined {
     const lowerContent = content.toLowerCase();
 
@@ -316,9 +315,8 @@ function detectEmotion(content: string): string | undefined {
     return undefined;
 }
 
-/**
- * Call Ollama API to generate response
- */
+// Call Ollama API to generate response
+
 async function callOllamaAPI(
     messages: OllamaChatMessage[],
 ): Promise<OllamaChatResponse> {
@@ -448,9 +446,8 @@ export async function callSouliVoiceAPI(params: {
     };
 }
 
-/**
- * Generate AI response for a conversation
- */
+// Generate AI response for a conversation
+
 export async function generateResponse(
     conversationHistory: ChatMessage[],
     userMessage: string,
