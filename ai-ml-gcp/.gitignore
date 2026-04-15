@@ -24,6 +24,7 @@ souli_pipeline/data/videos.csv
 .DS_Store
 Thumbs.db
 
+integration.md
 .claude/
 CLAUDE.md
 

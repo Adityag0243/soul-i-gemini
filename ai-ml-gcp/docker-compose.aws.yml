@@ -151,6 +151,11 @@ services:
     volumes: *souli-volumes
     environment:
       <<: *souli-env
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      GEMINI_FLASH_MODEL: ${GEMINI_FLASH_MODEL}
+      GEMINI_PRO_MODEL: ${GEMINI_PRO_MODEL}
+      MONGODB_ATLAS_URI: ${MONGODB_ATLAS_URI}
+      MONGODB_DB_NAME: ${MONGODB_DB_NAME}
     command: [ "gunicorn", "souli_pipeline.api:app", "--worker-class", "uvicorn.workers.UvicornWorker", "--workers", "3", "--bind", "0.0.0.0:8000", "--timeout", "120" ]
     ports:
       - "8000:8000" # Mobile app calls http://<EC2_PUBLIC_IP>:8000
@@ -191,6 +196,11 @@ services:
       - QDRANT_COLLECTION=${QDRANT_COLLECTION:-souli_chunks_improved}
       - SOULI_LOG_LEVEL=DEBUG
       - TRANSFORMERS_VERBOSITY=error
+      - GEMINI_API_KEY=${GEMINI_API_KEY}          # ← these three were missing
+      - GEMINI_FLASH_MODEL=${GEMINI_FLASH_MODEL}
+      - GEMINI_PRO_MODEL=${GEMINI_PRO_MODEL}
+      - MONGODB_ATLAS_URI=${MONGODB_ATLAS_URI}
+      - MONGODB_DB_NAME=${MONGODB_DB_NAME}
     command: [ "streamlit", "run", "/app/souli_pipeline/streamlit_dev.py", "--server.port=8502", "--server.address=0.0.0.0" ]
     ports:
       - "8502:8502"
@@ -213,3 +223,6 @@ services:
     command: [ "--config", "/etc/livekit.yaml" ]
     profiles:
       - livekit-selfhosted
+
+
+

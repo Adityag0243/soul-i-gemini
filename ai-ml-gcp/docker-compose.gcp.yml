@@ -149,6 +149,11 @@ services:
     volumes: *souli-volumes
     environment:
       <<: *souli-env
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      GEMINI_FLASH_MODEL: ${GEMINI_FLASH_MODEL}
+      GEMINI_PRO_MODEL: ${GEMINI_PRO_MODEL}
+      MONGODB_ATLAS_URI: ${MONGODB_ATLAS_URI}
+      MONGODB_DB_NAME: ${MONGODB_DB_NAME}
     command: [ "gunicorn", "souli_pipeline.api:app", "--worker-class", "uvicorn.workers.UvicornWorker", "--workers", "3", "--bind", "0.0.0.0:8000", "--timeout", "120" ]
     ports:
       - "8000:8000" # Mobile app calls http://<VM_IP>:8000
@@ -211,3 +216,5 @@ services:
     command: [ "--config", "/etc/livekit.yaml" ]
     profiles:
       - livekit-selfhosted
+
+
