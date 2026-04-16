@@ -26,6 +26,7 @@ qdrant-client>=1.9.0
 
 # ── Voice pipeline ─────────────────────────────────────────────────────────────
 edge-tts>=6.1.9
+imageio-ffmpeg>=0.6.0
 
 # ── LiveKit (voice pipeline) ──────────────────────────────────────────────────
 livekit>=0.11

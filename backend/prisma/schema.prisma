@@ -148,7 +148,7 @@ model AuthIdentity {
   // OAUTH provider fields (Google, Apple)
   providerAccountId String? @map("provider_account_id")
 
-  // mobile provider fields
+  // mobile provider fields (baad mein use karsakte hai)
   mobileNumber   String?  @map("mobile_number") @db.VarChar(20)
   mobileVerified Boolean  @default(false) @map("mobile_verified")
 

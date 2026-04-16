@@ -1,5 +1,10 @@
-import { AccessToken } from 'livekit-server-sdk';
+import {
+    AccessToken,
+    AgentDispatchClient,
+    RoomServiceClient,
+} from 'livekit-server-sdk';
 import { InternalError } from '../../../core/api-error';
+import logger from '../../../core/logger';
 import { voiceConfig } from '../../../config';
 import ChatService from '../../chat/services/chat.service';
 import {
@@ -44,6 +49,110 @@ export interface VoiceBootstrapResponse extends VoiceTokenResponse {
     chatSessionId: string;
     transcriptEndpoint: string;
     textMessageEndpoint: string;
+    agentName?: string;
+    agentDispatchId?: string;
+}
+
+function toLiveKitHttpHost(url: string): string {
+    if (url.startsWith('wss://'))
+        return `https://${url.slice('wss://'.length)}`;
+    if (url.startsWith('ws://')) return `http://${url.slice('ws://'.length)}`;
+    return url;
+}
+
+async function ensureAgentDispatch(
+    roomName: string,
+    userId: number,
+    chatSessionId: string,
+): Promise<{ agentName: string; agentDispatchId?: string }> {
+    const agentName = process.env.SOULI_AGENT_NAME || 'souli-voice';
+    const host = toLiveKitHttpHost(voiceConfig.url);
+
+    try {
+        const client = new AgentDispatchClient(
+            host,
+            voiceConfig.apiKey,
+            voiceConfig.apiSecret,
+        );
+
+        const existing = await client.listDispatch(roomName);
+        const existingForAgent = existing.filter(
+            (dispatch) => dispatch.agentName === agentName,
+        );
+
+        for (const dispatch of existingForAgent) {
+            try {
+                await client.deleteDispatch(dispatch.id, roomName);
+            } catch (deleteError) {
+                logger.warn('Could not delete stale voice agent dispatch', {
+                    roomName,
+                    agentName,
+                    dispatchId: dispatch.id,
+                    deleteError,
+                });
+            }
+        }
+
+        const created = await client.createDispatch(roomName, agentName, {
+            metadata: JSON.stringify({
+                source: 'voice-bootstrap',
+                userId,
+                chatSessionId,
+            }),
+        });
+
+        logger.info('Created voice agent dispatch', {
+            roomName,
+            agentName,
+            dispatchId: created.id,
+            chatSessionId,
+            userId,
+        });
+
+        return { agentName, agentDispatchId: created.id };
+    } catch (error) {
+        logger.warn('Failed to create voice agent dispatch', {
+            roomName,
+            agentName,
+            chatSessionId,
+            userId,
+            error,
+        });
+        return { agentName };
+    }
+}
+
+async function ensureRoomExists(roomName: string): Promise<void> {
+    const host = toLiveKitHttpHost(voiceConfig.url);
+
+    try {
+        const roomClient = new RoomServiceClient(
+            host,
+            voiceConfig.apiKey,
+            voiceConfig.apiSecret,
+        );
+
+        await roomClient.createRoom({
+            name: roomName,
+            emptyTimeout: 60,
+            departureTimeout: 120,
+        });
+
+        logger.info('Ensured voice room exists', { roomName });
+    } catch (error) {
+        const err = error as { code?: string; message?: string };
+        const msg = err?.message || '';
+
+        // Room may already exist; that's fine for bootstrap.
+        if (err?.code === 'already_exists' || /already exists/i.test(msg)) {
+            return;
+        }
+
+        logger.warn('Could not ensure room existence before dispatch', {
+            roomName,
+            error,
+        });
+    }
 }
 
 export async function createVoiceToken(
@@ -116,11 +225,20 @@ export async function createVoiceBootstrap(
         platform: input.platform,
     });
 
+    await ensureRoomExists(tokenResult.roomName);
+
+    const dispatchResult = await ensureAgentDispatch(
+        tokenResult.roomName,
+        userId,
+        chatSessionId,
+    );
+
     return {
         ...tokenResult,
         chatSessionId,
         transcriptEndpoint: '/chat/messages/voice-transcript',
         textMessageEndpoint: '/chat/messages',
+        ...dispatchResult,
     };
 }
 

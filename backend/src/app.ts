@@ -1,6 +1,7 @@
 import logger from './core/logger';
 import express from 'express';
 import cors from 'cors';
+import path from 'path';
 import { isProduction, originUrl } from './config';
 import router from './routes/index';
 import { errorHandler } from './middlewares/error.middleware';
@@ -16,6 +17,15 @@ process.on('uncaughtException', (e) => {
 });
 
 export const app = express();
+
+// local QA page for voice integration testing
+app.get('/voice-test.html', (_req, res) => {
+    res.sendFile(path.join(__dirname, '..', 'voice-test.html'));
+});
+
+app.get('/favicon.ico', (_req, res) => {
+    res.status(204).end();
+});
 
 // webhooks raw body for signature verification
 app.post(
