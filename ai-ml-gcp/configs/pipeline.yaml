@@ -92,7 +92,7 @@ retrieval:
   top_k_teaching: 5
   qdrant_host: "localhost"
   qdrant_port: 6333
-  qdrant_collection: "souli_chunks"
+  qdrant_collection: "souli_chunks_improved"
 
 # Conversation engine settings (Ollama llama3.1 + Qwen tagger)
 conversation:
@@ -106,6 +106,7 @@ conversation:
   # How many turns before nudging user toward solution/venting choice
   max_intake_turns: 4
   temperature: 0.75
+  use_multi_collections: true    
 
 multi_ingestion:
   # General semantic collection (shared with improved pipeline)
@@ -139,3 +140,4 @@ voice:
   tts_provider: "edge_tts"
   # Indian English female voice — warm and natural
   tts_voice: "en-IN-NeerjaNeural"
+

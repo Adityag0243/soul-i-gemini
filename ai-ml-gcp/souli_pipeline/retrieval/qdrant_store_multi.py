@@ -29,6 +29,8 @@ import uuid
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
+from sentence_transformers import SentenceTransformer
+
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +73,7 @@ _PHASE_COLLECTION_MAP: Dict[str, List[str]] = {
     "sharing":      ["souli_stories", "souli_patterns"],          # early sharing
     "sharing_late": ["souli_healing", "souli_commitment"],         # turns 5+
     "deepening":    ["souli_healing", "souli_commitment"],
-    "solution":     ["souli_activities", "souli_healing"],
+    "solution":     ["souli_activities", "souli_healing" ],
     "summary":      ["souli_healing"],
 }
 
@@ -106,7 +108,6 @@ def _ensure_collection(client, collection: str):
 def _get_encoder(model_name: str = _DEFAULT_MODEL):
     if model_name not in _encoder_cache:
         import torch
-        from sentence_transformers import SentenceTransformer
         device = "cuda" if torch.cuda.is_available() else "cpu"
         logger.info("[MULTI] Loading embedding model: %s on %s", model_name, device)
         _encoder_cache[model_name] = SentenceTransformer(model_name, device=device)

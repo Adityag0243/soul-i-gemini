@@ -16,6 +16,8 @@ import tempfile
 import importlib
 from io import StringIO
 from typing import Any
+import requests
+import time
 
 
 OLLAMA_ENDPOINT = os.environ.get("OLLAMA_ENDPOINT", "http://localhost:11434")
@@ -87,16 +89,16 @@ def _check_system_health():
             _ok("Qdrant server is reachable")
             st.caption(f"Collections: `{'`, `'.join(collections) if collections else 'none'}`")
 
-            if "souli_chunks" not in collections:
-                _warn("`souli_chunks` collection missing — RAG will return 0 results")
+            if "souli_chunks_improved" not in collections:
+                _warn("`souli_chunks_improved` collection missing — RAG will return 0 results")
                 st.caption("Run `souli ingest` to populate it")
             else:
-                info = client.get_collection("souli_chunks")
+                info = client.get_collection("souli_chunks_improved")
                 count = info.points_count
                 if count == 0:
-                    _warn("`souli_chunks` exists but is EMPTY — RAG returning nothing")
+                    _warn("`souli_chunks_improved` exists but is EMPTY — RAG returning nothing")
                 else:
-                    _ok(f"`souli_chunks` has {count:,} vectors")
+                    _ok(f"`souli_chunks_improved` has {count:,} vectors")
 
         except Exception as e:
             _fail(f"Qdrant server unreachable: {e}")
@@ -262,7 +264,7 @@ def _check_rag_pipeline():
             t0 = time.perf_counter()
             chunks = query_chunks(
                 user_text=query,
-                collection="souli_chunks",
+                collection="souli_chunks_improved",
                 energy_node=node,
                 top_k=3,
             )
@@ -739,12 +741,244 @@ for f in os.listdir():          # scans CURRENT WORKING DIRECTORY
     else:
         _warn("souli_pipeline source not found at expected path")
 
+_TAGGER_TEST_SAMPLES = [
+    {
+        "label": "Depleted energy",
+        "text": "I am completely exhausted. I have nothing left to give. I wake up tired and I go to sleep tired. I feel like an empty battery.",
+        "expected_node": "depleted_energy",
+    },
+    {
+        "label": "Scattered energy",
+        "text": "I have 50 things on my to-do list and I keep jumping between them. I am busy all day but nothing actually gets done. I feel overwhelmed and unfocused.",
+        "expected_node": "scattered_energy",
+    },
+    {
+        "label": "Blocked energy",
+        "text": "I know what I need to do but I just cannot make myself do it. I feel frozen and stuck. There is no movement in my life, just stagnation.",
+        "expected_node": "blocked_energy",
+    },
+]
+
+def _run_tagger_test(text: str, ollama_endpoint: str, tagger_model: str) -> dict:
+    """
+    Calls tag_chunk() directly and returns the result dict.
+    Returns a special 'error' key if something went wrong.
+    """
+    try:
+        from souli_pipeline.youtube.energy_tagger import tag_chunk
+        start = time.time()
+        result = tag_chunk(
+            text=text,
+            ollama_model=tagger_model,
+            ollama_endpoint=ollama_endpoint,
+            timeout_s=30,
+        )
+        result["elapsed_s"] = round(time.time() - start, 2)
+        return result
+    except Exception as exc:
+        return {"energy_node": "error", "reason": str(exc), "elapsed_s": 0}
+
+def _check_services_health():
+    """
+    Section 0 of Dev Testing page — shows live status of Ollama, Tagger, and Qdrant.
+    Call this at the top of show() in dev_testing.py.
+    """
+    st.subheader("0 · Services Health Check")
+    st.caption("Checks Ollama, the energy tagger, and Qdrant before you run anything.")
+ 
+    # Read endpoints from environment (same as the rest of dev_testing.py)
+    ollama_endpoint = os.environ.get("OLLAMA_ENDPOINT", "http://localhost:11434")
+    qdrant_host     = os.environ.get("QDRANT_HOST", "localhost")
+    qdrant_port     = int(os.environ.get("QDRANT_PORT", "6333"))
+    tagger_model    = "qwen2.5:1.5b"   # matches energy_tagger.py default
+ 
+    run_check = st.button("🔍 Run Health Check", type="primary")
+ 
+    if not run_check:
+        st.info("Click **Run Health Check** to test all services live.")
+        return
+    st.markdown("#### 1 · Ollama")
+    try:
+        resp = requests.get(f"{ollama_endpoint}/api/tags", timeout=5)
+        if resp.status_code == 200:
+            models_data = resp.json().get("models", [])
+            model_names = [m["name"] for m in models_data]
+ 
+            st.success(f"✅ Ollama is live at `{ollama_endpoint}`")
+            st.markdown(f"**Models loaded:** `{'`, `'.join(model_names) if model_names else 'none'}`")
+ 
+            # Check if our tagger model is actually there
+            tagger_present = any(tagger_model in name for name in model_names)
+            if tagger_present:
+                st.success(f"✅ Tagger model `{tagger_model}` is available")
+            else:
+                st.error(
+                    f"❌ Tagger model `{tagger_model}` is NOT in Ollama. "
+                    f"Run `ollama pull {tagger_model}` to fix this."
+                )
+            ollama_ok = True
+        else:
+            st.error(f"❌ Ollama responded with status `{resp.status_code}`")
+            ollama_ok = False
+    except Exception as exc:
+        st.error(f"❌ Cannot reach Ollama at `{ollama_endpoint}` — {exc}")
+        ollama_ok = False
+ 
+    st.divider()
+ 
+    # ── 2. Energy Tagger Live Test ────────────────────────────────────────────
+    st.markdown("#### 2 · Energy Tagger")
+    st.caption(
+        "Sends 3 test sentences through your actual `tag_chunk()` function. "
+        "Green = Qwen responded. Red = fell back to keyword guesser."
+    )
+ 
+    if not ollama_ok:
+        st.warning("⚠️ Skipping tagger test — Ollama is not reachable.")
+    else:
+        cols = st.columns(len(_TAGGER_TEST_SAMPLES))
+ 
+        for col, sample in zip(cols, _TAGGER_TEST_SAMPLES):
+            with col:
+                with st.spinner(f"Testing '{sample['label']}'..."):
+                    result = _run_tagger_test(
+                        text=sample["text"],
+                        ollama_endpoint=ollama_endpoint,
+                        tagger_model=tagger_model,
+                    )
+ 
+                node   = result.get("energy_node", "")
+                reason = result.get("reason", "")
+                elapsed = result.get("elapsed_s", 0)
+ 
+                # --- Determine status ---
+                is_error    = node == "error"
+                is_fallback = reason == "keyword_fallback"
+                is_good     = not is_error and not is_fallback
+ 
+                # --- Color card based on status ---
+                if is_good:
+                    border_color = "#16a34a"   # green
+                    status_icon  = "🟢"
+                    status_text  = "Live (Qwen responded)"
+                elif is_fallback:
+                    border_color = "#dc2626"   # red
+                    status_icon  = "🔴"
+                    status_text  = "Fallback mode (Qwen failed)"
+                else:
+                    border_color = "#dc2626"
+                    status_icon  = "🔴"
+                    status_text  = "Error"
+ 
+                st.markdown(
+                    f"""
+                    <div style="border: 2px solid {border_color}; border-radius: 10px;
+                                padding: 12px; margin-bottom: 8px;">
+                        <div style="font-size: 0.75rem; color: #64748b; font-weight: 600;
+                                    text-transform: uppercase; letter-spacing: 0.5px;">
+                            {sample['label']}
+                        </div>
+                        <div style="font-size: 1.1rem; margin: 6px 0;">
+                            {status_icon} <strong>{node}</strong>
+                        </div>
+                        <div style="font-size: 0.78rem; color: #475569; margin-bottom: 6px;">
+                            {status_text}
+                        </div>
+                        <div style="font-size: 0.75rem; color: #94a3b8; font-style: italic;">
+                            "{reason[:80]}{'...' if len(reason) > 80 else ''}"
+                        </div>
+                        <div style="font-size: 0.7rem; color: #94a3b8; margin-top: 6px;">
+                            ⏱ {elapsed}s
+                        </div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+ 
+                # Show the test text in an expander so you can inspect it
+                with st.expander("See test input"):
+                    st.caption(sample["text"])
+ 
+        # Overall tagger verdict
+        st.markdown("---")
+        with st.spinner("Running all 3 tagger tests for summary..."):
+            all_results = [
+                _run_tagger_test(s["text"], ollama_endpoint, tagger_model)
+                for s in _TAGGER_TEST_SAMPLES
+            ]
+ 
+        fallback_count = sum(1 for r in all_results if r.get("reason") == "keyword_fallback")
+        error_count    = sum(1 for r in all_results if r.get("energy_node") == "error")
+        good_count     = len(all_results) - fallback_count - error_count
+ 
+        if good_count == len(all_results):
+            st.success(f"✅ Tagger is fully working — all {good_count} test samples tagged by Qwen")
+        elif good_count > 0:
+            st.warning(f"⚠️ Tagger partially working — {good_count} good, {fallback_count} fallback, {error_count} errors")
+        else:
+            st.error(
+                f"❌ Tagger is NOT working — all {len(all_results)} samples fell back to keyword guesser. "
+                "This means every video you ingest will get `blocked_energy` on everything. "
+                "Check that Ollama is running and `qwen2.5:1.5b` is loaded."
+            )
+ 
+    st.divider()
+ 
+    # ── 3. Qdrant ─────────────────────────────────────────────────────────────
+    st.markdown("#### 3 · Qdrant")
+ 
+    ALL_COLLECTIONS = [
+        "souli_chunks_improved_improved",
+        "souli_healing",
+        "souli_activities",
+        "souli_stories",
+        "souli_commitment",
+        "souli_patterns",
+        "souli_chunks_improved",  # legacy collection
+    ]
+ 
+    try:
+        from qdrant_client import QdrantClient
+        client = QdrantClient(host=qdrant_host, port=qdrant_port, timeout=5)
+        existing_collections = {c.name for c in client.get_collections().collections}
+ 
+        st.success(f"✅ Qdrant is live at `{qdrant_host}:{qdrant_port}`")
+ 
+        rows = []
+        for cname in ALL_COLLECTIONS:
+            if cname in existing_collections:
+                info   = client.get_collection(cname)
+                points = info.points_count or 0
+                rows.append({
+                    "Collection": cname,
+                    "Points":     points,
+                    "Status":     "✅ Has data" if points > 0 else "⬜ Empty",
+                })
+            else:
+                rows.append({
+                    "Collection": cname,
+                    "Points":     0,
+                    "Status":     "❌ Doesn't exist yet",
+                })
+ 
+        df_qdrant = pd.DataFrame(rows)
+        st.dataframe(df_qdrant, use_container_width=True, hide_index=True)
+ 
+        total_points = sum(r["Points"] for r in rows)
+        st.caption(f"Total points across all collections: **{total_points:,}**")
+ 
+    except Exception as exc:
+        st.error(f"❌ Cannot reach Qdrant at `{qdrant_host}:{qdrant_port}` — {exc}")
+        st.caption("Make sure Qdrant is running: `docker run -p 6333:6333 qdrant/qdrant`")
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Main
 # ─────────────────────────────────────────────────────────────────────────────
 
 def show():
+    _check_services_health() 
+    st.divider()     
     st.header("🔬 Dev Testing Dashboard")
     st.markdown(
         """

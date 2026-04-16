@@ -57,8 +57,8 @@ def main():
         from pages import dev_testing
         dev_testing.show()
     elif page == "🧬 Multi-Collection Ingestion":
-        from pages import multi_data_ingestion_improved
-        multi_data_ingestion_improved.show()
+        from pages import multi_data_ingestion_improved_page
+        multi_data_ingestion_improved_page.show()
 
 if __name__ == "__main__":
     main()

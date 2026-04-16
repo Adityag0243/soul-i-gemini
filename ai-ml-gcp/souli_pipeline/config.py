@@ -95,6 +95,7 @@ class ConversationConfig(BaseModel):
     max_intake_turns: int = 4
     # Temperature for counselor
     temperature: float = 0.75
+    use_multi_collections: bool = True
 
 
 class MultiIngestionConfig(BaseModel):

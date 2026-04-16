@@ -33,7 +33,7 @@ x-souli-env: &souli-env
   OLLAMA_TAGGER_MODEL: ${OLLAMA_TAGGER_MODEL:-qwen2.5:1.5b}
   QDRANT_HOST: qdrant
   QDRANT_PORT: 6333
-  QDRANT_COLLECTION: ${QDRANT_COLLECTION:-souli_chunks}
+  QDRANT_COLLECTION: ${QDRANT_COLLECTION:-souli_chunks_improved}
   LIVEKIT_URL: ${LIVEKIT_URL}
   LIVEKIT_API_KEY: ${LIVEKIT_API_KEY}
   LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
@@ -41,6 +41,7 @@ x-souli-env: &souli-env
   SOULI_OUTPUTS_DIR: /app/outputs
   SOULI_LOG_LEVEL: ${SOULI_LOG_LEVEL:-INFO}
   SOULI_CONFIG_PATH: /app/configs/pipeline.aws.yaml
+  TRANSFORMERS_VERBOSITY: error 
 
 x-souli-volumes: &souli-volumes
   - souli-data:/app/data
@@ -150,6 +151,11 @@ services:
     volumes: *souli-volumes
     environment:
       <<: *souli-env
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      GEMINI_FLASH_MODEL: ${GEMINI_FLASH_MODEL}
+      GEMINI_PRO_MODEL: ${GEMINI_PRO_MODEL}
+      MONGODB_ATLAS_URI: ${MONGODB_ATLAS_URI}
+      MONGODB_DB_NAME: ${MONGODB_DB_NAME}
     command: [ "gunicorn", "souli_pipeline.api:app", "--worker-class", "uvicorn.workers.UvicornWorker", "--workers", "3", "--bind", "0.0.0.0:8000", "--timeout", "120" ]
     ports:
       - "8000:8000" # Mobile app calls http://<EC2_PUBLIC_IP>:8000
@@ -187,13 +193,51 @@ services:
       - OLLAMA_ENDPOINT=http://ollama:11434
       - QDRANT_HOST=qdrant
       - QDRANT_PORT=6333
-      - QDRANT_COLLECTION=${QDRANT_COLLECTION:-souli_chunks}
+      - QDRANT_COLLECTION=${QDRANT_COLLECTION:-souli_chunks_improved}
       - SOULI_LOG_LEVEL=DEBUG
       - TRANSFORMERS_VERBOSITY=error
     command: [ "streamlit", "run", "/app/souli_pipeline/streamlit_dev.py", "--server.port=8502", "--server.address=0.0.0.0" ]
     ports:
       - "8502:8502"
+  
 
+  souli-voice:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: souli-voice-worker
+    restart: unless-stopped
+    networks:
+      - souli-net
+    depends_on:
+      ollama:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    volumes: *souli-volumes
+    environment:
+      <<: *souli-env
+      # LiveKit connection — reads from your .env file
+      LIVEKIT_URL: ${LIVEKIT_URL}
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
+      LIVEKIT_ROOM: ${LIVEKIT_ROOM:-souli-room}
+      SOULI_CONFIG_PATH: /app/configs/pipeline.aws.yaml
+    # This is the command that actually starts the voice agent
+    command:
+      - "python"
+      - "-m"
+      - "souli_pipeline.voice.run_worker"
+      - "start"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [ gpu ]
+    # No ports needed — agent connects OUT to LiveKit, not the other way
+    # Logs will show: [AGENT] Joined room, [TURN N] STT/LLM/TTS timings, etc.
   # ── LiveKit SFU (self-hosted, optional) ───────────────────────────────────
   livekit:
     image: livekit/livekit-server:latest
@@ -212,3 +256,6 @@ services:
     command: [ "--config", "/etc/livekit.yaml" ]
     profiles:
       - livekit-selfhosted
+
+
+
