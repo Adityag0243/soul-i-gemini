@@ -1,0 +1,572 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Souli Voice Test</title>
+        <style>
+            :root {
+                --bg: #0b1220;
+                --panel: #121a2b;
+                --text: #e5ecff;
+                --muted: #9fb0d9;
+                --accent: #33d6a6;
+                --warn: #ffb347;
+                --err: #ff6b6b;
+                --border: #22304d;
+            }
+
+            * {
+                box-sizing: border-box;
+            }
+
+            body {
+                margin: 0;
+                font-family:
+                    Segoe UI,
+                    Tahoma,
+                    sans-serif;
+                background: radial-gradient(
+                    circle at 20% 10%,
+                    #14203a 0%,
+                    var(--bg) 50%
+                );
+                color: var(--text);
+                min-height: 100vh;
+                padding: 20px;
+            }
+
+            .grid {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 16px;
+                max-width: 1200px;
+                margin: 0 auto;
+            }
+
+            .panel {
+                background: var(--panel);
+                border: 1px solid var(--border);
+                border-radius: 12px;
+                padding: 16px;
+            }
+
+            h1 {
+                margin: 0 0 8px;
+                font-size: 22px;
+            }
+            h2 {
+                margin: 0 0 12px;
+                font-size: 16px;
+                color: var(--muted);
+            }
+
+            .row {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 8px;
+                margin-bottom: 8px;
+            }
+            .row-1 {
+                display: grid;
+                grid-template-columns: 1fr;
+                gap: 8px;
+                margin-bottom: 8px;
+            }
+
+            label {
+                font-size: 12px;
+                color: var(--muted);
+                display: block;
+                margin-bottom: 4px;
+            }
+
+            input {
+                width: 100%;
+                padding: 10px;
+                border-radius: 8px;
+                border: 1px solid var(--border);
+                background: #0d1425;
+                color: var(--text);
+            }
+
+            button {
+                padding: 10px 12px;
+                border: none;
+                border-radius: 8px;
+                cursor: pointer;
+                font-weight: 600;
+                background: #2d436f;
+                color: white;
+            }
+
+            button.primary {
+                background: var(--accent);
+                color: #072019;
+            }
+            button.warn {
+                background: var(--warn);
+                color: #2c1a00;
+            }
+            button.err {
+                background: var(--err);
+                color: #2d0707;
+            }
+
+            .btns {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 8px;
+                margin-top: 8px;
+                margin-bottom: 8px;
+            }
+
+            .status {
+                font-size: 13px;
+                color: var(--muted);
+                border: 1px dashed var(--border);
+                border-radius: 8px;
+                padding: 10px;
+                margin-top: 8px;
+            }
+
+            .mono {
+                font-family: Consolas, Menlo, Monaco, monospace;
+                font-size: 12px;
+                word-break: break-all;
+                color: #b8c8ec;
+            }
+
+            pre {
+                margin: 0;
+                max-height: 320px;
+                overflow: auto;
+                background: #0d1425;
+                border-radius: 8px;
+                border: 1px solid var(--border);
+                padding: 10px;
+                font-size: 12px;
+                line-height: 1.5;
+                color: #dbe8ff;
+            }
+
+            audio {
+                width: 100%;
+                margin-top: 10px;
+            }
+
+            @media (max-width: 900px) {
+                .grid {
+                    grid-template-columns: 1fr;
+                }
+                .row {
+                    grid-template-columns: 1fr;
+                }
+            }
+        </style>
+    </head>
+    <body>
+        <div class="grid">
+            <section class="panel">
+                <h1>Souli Voice Test Page</h1>
+                <h2>Backend + LiveKit + Worker end-to-end</h2>
+
+                <div class="row-1">
+                    <div>
+                        <label>Backend Base URL</label>
+                        <input id="baseUrl" value="http://localhost:8000" />
+                    </div>
+                </div>
+
+                <div class="row-1">
+                    <div>
+                        <label>x-api-key</label>
+                        <input id="apiKey" />
+                    </div>
+                </div>
+
+                <div class="row">
+                    <div>
+                        <label>Email</label>
+                        <input id="email" value="test-voice@souli.com" />
+                    </div>
+                    <div>
+                        <label>Password</label>
+                        <input
+                            id="password"
+                            type="password"
+                            value="TestPassword123"
+                        />
+                    </div>
+                </div>
+
+                <div class="btns">
+                    <button id="registerBtn">Register</button>
+                    <button id="loginBtn" class="primary">Login</button>
+                </div>
+
+                <div class="row-1">
+                    <div>
+                        <label>Access Token (auto-filled after login)</label>
+                        <input id="accessToken" />
+                    </div>
+                </div>
+
+                <div class="row">
+                    <div>
+                        <label>Participant Name</label>
+                        <input id="participantName" value="Backend QA" />
+                    </div>
+                    <div>
+                        <label>Existing Session ID (optional)</label>
+                        <input
+                            id="sessionId"
+                            placeholder="leave empty to create new"
+                        />
+                    </div>
+                </div>
+
+                <div class="btns">
+                    <button id="bootstrapBtn" class="primary">
+                        Create Voice Bootstrap
+                    </button>
+                    <button id="connectBtn" class="primary">
+                        Connect LiveKit + Mic
+                    </button>
+                    <button id="disconnectBtn" class="err">Disconnect</button>
+                    <button id="messagesBtn" class="warn">
+                        Fetch Session Messages
+                    </button>
+                </div>
+
+                <div class="status" id="status">Idle</div>
+                <div class="status">
+                    <div>Room: <span class="mono" id="roomName">-</span></div>
+                    <div>
+                        Chat Session:
+                        <span class="mono" id="chatSessionId">-</span>
+                    </div>
+                    <div>
+                        LiveKit URL: <span class="mono" id="livekitUrl">-</span>
+                    </div>
+                </div>
+
+                <audio id="remoteAudio" autoplay controls></audio>
+            </section>
+
+            <section class="panel">
+                <h2>Logs</h2>
+                <pre id="logs"></pre>
+                <h2 style="margin-top: 16px">Messages</h2>
+                <pre id="messages"></pre>
+            </section>
+        </div>
+
+        <script src="https://cdn.jsdelivr.net/npm/livekit-client/dist/livekit-client.umd.min.js"></script>
+        <script>
+            const $ = (id) => document.getElementById(id);
+            const logs = $('logs');
+            const messages = $('messages');
+
+            let bootstrapData = null;
+            let room = null;
+
+            function getLiveKitClientGlobal() {
+                return (
+                    window.LivekitClient ||
+                    window.LiveKitClient ||
+                    window.livekit ||
+                    null
+                );
+            }
+
+            async function ensureLiveKitClientLoaded() {
+                if (getLiveKitClientGlobal()) return;
+
+                const fallbackSrc =
+                    'https://unpkg.com/livekit-client/dist/livekit-client.umd.min.js';
+                await new Promise((resolve, reject) => {
+                    const s = document.createElement('script');
+                    s.src = fallbackSrc;
+                    s.async = true;
+                    s.onload = resolve;
+                    s.onerror = () =>
+                        reject(
+                            new Error(
+                                'Failed to load LiveKit script from fallback CDN',
+                            ),
+                        );
+                    document.head.appendChild(s);
+                });
+            }
+
+            function log(line) {
+                const stamp = new Date().toISOString();
+                logs.textContent += `[${stamp}] ${line}\n`;
+                logs.scrollTop = logs.scrollHeight;
+            }
+
+            function setStatus(text) {
+                $('status').textContent = text;
+                log(text);
+            }
+
+            function saveInputs() {
+                const data = {
+                    baseUrl: $('baseUrl').value,
+                    apiKey: $('apiKey').value,
+                    email: $('email').value,
+                    password: $('password').value,
+                    accessToken: $('accessToken').value,
+                    participantName: $('participantName').value,
+                    sessionId: $('sessionId').value,
+                };
+                localStorage.setItem('souliVoiceTest', JSON.stringify(data));
+            }
+
+            function loadInputs() {
+                try {
+                    const raw = localStorage.getItem('souliVoiceTest');
+                    if (!raw) return;
+                    const data = JSON.parse(raw);
+                    Object.keys(data).forEach((key) => {
+                        if ($(key) && data[key] !== undefined)
+                            $(key).value = data[key];
+                    });
+                } catch (e) {
+                    log(`Failed to load saved inputs: ${e.message}`);
+                }
+            }
+
+            async function api(path, options = {}) {
+                const baseUrl = $('baseUrl').value.trim();
+                const apiKey = $('apiKey').value.trim();
+                const token = $('accessToken').value.trim();
+
+                const headers = {
+                    'Content-Type': 'application/json',
+                    'x-api-key': apiKey,
+                    ...(options.headers || {}),
+                };
+
+                if (token) headers.Authorization = `Bearer ${token}`;
+
+                const res = await fetch(`${baseUrl}${path}`, {
+                    ...options,
+                    headers,
+                });
+
+                const text = await res.text();
+                let body;
+                try {
+                    body = text ? JSON.parse(text) : null;
+                } catch {
+                    body = text;
+                }
+
+                if (!res.ok) {
+                    throw new Error(
+                        `HTTP ${res.status}: ${JSON.stringify(body)}`,
+                    );
+                }
+
+                return body;
+            }
+
+            async function register() {
+                saveInputs();
+                setStatus('Registering user...');
+                const body = {
+                    name: $('participantName').value.trim() || 'Voice QA',
+                    email: $('email').value.trim(),
+                    password: $('password').value,
+                };
+                const res = await api('/auth/email/register', {
+                    method: 'POST',
+                    body: JSON.stringify(body),
+                });
+
+                const token = res?.data?.tokens?.accessToken;
+                if (token) $('accessToken').value = token;
+                saveInputs();
+                setStatus('Registered successfully. Access token updated.');
+            }
+
+            async function login() {
+                saveInputs();
+                setStatus('Logging in...');
+                const body = {
+                    email: $('email').value.trim(),
+                    password: $('password').value,
+                };
+                const res = await api('/auth/email/login', {
+                    method: 'POST',
+                    body: JSON.stringify(body),
+                });
+
+                const token = res?.data?.tokens?.accessToken;
+                if (!token)
+                    throw new Error('Access token missing in login response');
+                $('accessToken').value = token;
+                saveInputs();
+                setStatus('Login success. Access token updated.');
+            }
+
+            async function createBootstrap() {
+                saveInputs();
+                setStatus('Creating voice bootstrap...');
+                const body = {
+                    platform: 'web',
+                    participantName:
+                        $('participantName').value.trim() || 'Backend QA',
+                };
+
+                const sid = $('sessionId').value.trim();
+                if (sid) body.sessionId = sid;
+
+                const res = await api('/voice/bootstrap', {
+                    method: 'POST',
+                    body: JSON.stringify(body),
+                });
+
+                bootstrapData = res?.data || res;
+                $('roomName').textContent = bootstrapData.roomName || '-';
+                $('chatSessionId').textContent =
+                    bootstrapData.chatSessionId || '-';
+                $('livekitUrl').textContent = bootstrapData.livekitUrl || '-';
+                if (bootstrapData.chatSessionId)
+                    $('sessionId').value = bootstrapData.chatSessionId;
+                saveInputs();
+                setStatus('Voice bootstrap created. Ready to connect.');
+                log(`Bootstrap: ${JSON.stringify(bootstrapData, null, 2)}`);
+            }
+
+            async function connectRoom() {
+                saveInputs();
+                if (!bootstrapData) {
+                    throw new Error('Create bootstrap first');
+                }
+
+                await ensureLiveKitClientLoaded();
+
+                const LK = getLiveKitClientGlobal();
+                if (!LK) {
+                    throw new Error('LiveKit client failed to load');
+                }
+
+                if (room) {
+                    await room.disconnect();
+                    room = null;
+                }
+
+                setStatus('Connecting to LiveKit room...');
+
+                room = new LK.Room({
+                    adaptiveStream: true,
+                    dynacast: true,
+                });
+
+                room.on(LK.RoomEvent.Connected, () => {
+                    setStatus('Connected to LiveKit. Enabling microphone...');
+                });
+
+                room.on(LK.RoomEvent.Disconnected, () => {
+                    setStatus('Disconnected from LiveKit');
+                });
+
+                room.on(
+                    LK.RoomEvent.TrackSubscribed,
+                    (track, publication, participant) => {
+                        log(
+                            `Track subscribed: kind=${track.kind} participant=${participant.identity}`,
+                        );
+                        if (track.kind === LK.Track.Kind.Audio) {
+                            const el = track.attach();
+                            const audioHost = $('remoteAudio');
+                            audioHost.srcObject = el.srcObject || null;
+                            if (!audioHost.srcObject) {
+                                audioHost.replaceWith(el);
+                                el.id = 'remoteAudio';
+                                el.autoplay = true;
+                                el.controls = true;
+                            }
+                            setStatus(
+                                `Receiving audio from ${participant.identity}`,
+                            );
+                        }
+                    },
+                );
+
+                room.on(LK.RoomEvent.ParticipantConnected, (participant) => {
+                    log(`Participant connected: ${participant.identity}`);
+                });
+
+                room.on(LK.RoomEvent.ConnectionStateChanged, (state) => {
+                    log(`Connection state: ${state}`);
+                });
+
+                await room.connect(
+                    bootstrapData.livekitUrl,
+                    bootstrapData.token,
+                );
+                await room.localParticipant.setMicrophoneEnabled(true);
+                setStatus('Mic published. Speak now.');
+            }
+
+            async function disconnectRoom() {
+                if (room) {
+                    await room.disconnect();
+                    room = null;
+                }
+                setStatus('Room disconnected.');
+            }
+
+            async function fetchMessages() {
+                const sid =
+                    $('sessionId').value.trim() ||
+                    $('chatSessionId').textContent.trim();
+                if (!sid || sid === '-')
+                    throw new Error('Session ID is missing');
+
+                setStatus('Fetching chat messages...');
+                const res = await api(`/chat/sessions/${sid}/messages`);
+                messages.textContent = JSON.stringify(res, null, 2);
+                setStatus('Messages loaded.');
+            }
+
+            async function run(action) {
+                try {
+                    await action();
+                } catch (e) {
+                    setStatus(`Error: ${e.message}`);
+                }
+            }
+
+            $('registerBtn').addEventListener('click', () => run(register));
+            $('loginBtn').addEventListener('click', () => run(login));
+            $('bootstrapBtn').addEventListener('click', () =>
+                run(createBootstrap),
+            );
+            $('connectBtn').addEventListener('click', () => run(connectRoom));
+            $('disconnectBtn').addEventListener('click', () =>
+                run(disconnectRoom),
+            );
+            $('messagesBtn').addEventListener('click', () =>
+                run(fetchMessages),
+            );
+
+            [
+                'baseUrl',
+                'apiKey',
+                'email',
+                'password',
+                'accessToken',
+                'participantName',
+                'sessionId',
+            ].forEach((id) => $(id).addEventListener('change', saveInputs));
+
+            loadInputs();
+            setStatus('Ready. Login -> Bootstrap -> Connect.');
+        </script>
+    </body>
+</html>

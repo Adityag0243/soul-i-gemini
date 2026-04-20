@@ -70,6 +70,26 @@ with top_right:
     c4.metric("Confidence", diag.get("confidence", "—"))
 
 # ── KB Toggle Bar ─────────────────────────────────────────────────────────────
+
+# ── PAGE NAVIGATION ───────────────────────────────────────────────────────────
+with st.sidebar:
+    st.markdown("### 🔬 Dev Pages")
+    _page = st.radio(
+        "Select page",
+        ["Ollama Engine", "🤖 Gemini Engine"],
+        label_visibility="collapsed",
+        key="dev_page_selector",
+    )
+
+if _page == "🤖 Gemini Engine":
+    _gpath = str(Path(__file__).parent.parent / "pages")
+    _gfile = str(Path(__file__).parent.parent / "pages" / "gemini_dev.py")
+    if _gpath not in sys.path:
+        sys.path.insert(0, _gpath)
+    with open(_gfile) as _f:
+        exec(compile(_f.read(), _gfile, "exec"), {"__name__": "__main__"})
+    st.stop()
+
 render_kb_bar()
 
 # ── TWO-COLUMN LAYOUT ─────────────────────────────────────────────────────────
