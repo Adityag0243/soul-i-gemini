@@ -25,7 +25,8 @@ In Docker (GCP):
 
 """
 from __future__ import annotations
-
+from dotenv import load_dotenv
+load_dotenv()
 import io
 import logging
 import os

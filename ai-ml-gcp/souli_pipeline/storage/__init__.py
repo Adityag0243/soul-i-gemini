@@ -1,3 +1,3 @@
-from .mongo_store import MongoSessionStore
+"""Storage package exports for Souli."""
 
-__all__ = ["MongoSessionStore"]
+__all__ = []

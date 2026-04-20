@@ -1,0 +1,33 @@
+# ── local_requirements.txt ────────────────────────────────────────────────────
+# Only what's needed for Gemini conversation + RAG + dev UI
+# No Whisper, no voice, no YouTube, no LiveKit
+
+# ── Core ──────────────────────────────────────────────────────────────────────
+pandas>=2.0
+openpyxl>=3.1
+pyyaml>=6.0
+requests>=2.31
+pydantic>=2.6
+
+# ── Gemini (Vertex AI) ────────────────────────────────────────────────────────
+google-genai>=0.8.0
+google-auth>=2.0.0
+
+# ── MongoDB ───────────────────────────────────────────────────────────────────
+pymongo[srv]>=4.7.0
+
+# ── Embeddings + Qdrant (for RAG) ─────────────────────────────────────────────
+sentence-transformers>=2.2
+qdrant-client>=1.9.0
+numpy>=1.24
+
+# ── Streamlit dev UI ──────────────────────────────────────────────────────────
+streamlit>=1.31.0
+
+# ── FastAPI (if you want to run the API locally too) ──────────────────────────
+fastapi>=0.110.0
+uvicorn>=0.29.0
+python-multipart>=0.0.9
+
+# load_dotenv for local env var management (e.g. GCP_PROJECT_ID)
+python-dotenv>=1.0.0
