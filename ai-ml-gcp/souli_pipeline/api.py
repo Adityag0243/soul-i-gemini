@@ -15,6 +15,14 @@ In Docker (GCP):
           "--workers", "3",
           "--bind", "0.0.0.0:8000",
           "--timeout", "120"
+          
+    New Addition.....
+    POST  /gemini/session/greeting      → get opening greeting (Gemini session)
+    POST  /gemini/chat                  → text message → Gemini reply
+    POST  /gemini/session/reset         → reset a Gemini session
+    GET   /gemini/session/{id}/state    → get current Gemini session state
+    GET   /gemini/health                → check Gemini + MongoDB connectivity
+
 """
 from __future__ import annotations
 
@@ -452,3 +460,181 @@ def greeting(session_id: str = Form(...)):
         energy_node=None,
         turn_count=0,
     )
+
+
+
+# gemini part api
+import os as _os
+from souli_pipeline.conversation.gemini_engine import GeminiEngine
+from souli_pipeline.storage import mongo_store as _mongo
+ 
+# ── Gemini session store (same pattern as existing _sessions dict) ─────────────
+# Maps session_id → GeminiEngine instance
+# One engine per session — holds in-memory state between turns
+_gemini_sessions: Dict[str, GeminiEngine] = {}
+ 
+ 
+def _get_or_create_gemini_engine(session_id: str) -> GeminiEngine:
+    """Return existing Gemini engine for session, or create a fresh one."""
+    if session_id not in _gemini_sessions:
+        engine = GeminiEngine.from_config(_load_config())
+        engine.new_session(session_id)
+        _gemini_sessions[session_id] = engine
+        logger.info("Gemini session created: %s", session_id)
+    return _gemini_sessions[session_id]
+ 
+ 
+def _load_config():
+    """Load pipeline config — reuses same path logic as existing engine setup."""
+    from souli_pipeline.config_loader import load_config
+    cfg_path = CONFIG_PATH  # reuses the existing CONFIG_PATH from top of api.py
+    return load_config(cfg_path)
+ 
+ 
+# ── 1. Gemini Greeting ─────────────────────────────────────────────────────────
+ 
+@app.post(
+    "/gemini/session/greeting",
+    summary="[Gemini] Get opening greeting",
+)
+def gemini_greeting(session_id: str = Form(...)):
+    """
+    Start a new Gemini session and get the opening greeting.
+    Creates a fresh session in memory and MongoDB.
+    """
+    engine = _get_or_create_gemini_engine(session_id)
+ 
+    # If session already has turns, reset it for a fresh start
+    if engine.state and engine.state.turn_count > 0:
+        engine.new_session(session_id)
+ 
+    greeting = engine.greeting()
+    return {
+        "session_id": session_id,
+        "greeting":   greeting,
+        "engine":     "gemini",
+        "phase":      "greeting",
+    }
+ 
+ 
+# ── 2. Gemini Chat ─────────────────────────────────────────────────────────────
+ 
+@app.post(
+    "/gemini/chat",
+    response_model=ChatResponse,       # reuses existing ChatResponse model
+    summary="[Gemini] Send a text message to Souli (Gemini version)",
+)
+def gemini_chat(req: ChatRequest):    # reuses existing ChatRequest model
+    """
+    Send a text message and get Souli's response (powered by Gemini).
+ 
+    - **session_id**: unique identifier for this conversation
+    - **message**: what the user typed
+ 
+    Returns the same ChatResponse format as /chat so mobile app needs
+    minimal changes to test this endpoint.
+    """
+    if not req.message.strip():
+        raise HTTPException(status_code=400, detail="message cannot be empty")
+ 
+    engine = _get_or_create_gemini_engine(req.session_id)
+ 
+    try:
+        reply = engine.turn(req.message, session_id=req.session_id)
+    except Exception as exc:
+        logger.error("Gemini engine error for session %s: %s", req.session_id, exc)
+        raise HTTPException(status_code=500, detail=f"Gemini engine error: {exc}")
+ 
+    diag = engine.diagnosis_summary
+ 
+    return ChatResponse(
+        session_id  = req.session_id,
+        reply       = reply,
+        phase       = engine.state.phase if engine.state else "unknown",
+        energy_node = diag.get("energy_node"),
+        turn_count  = diag.get("turn_count", 0),
+    )
+ 
+ 
+# ── 3. Gemini Session Reset ────────────────────────────────────────────────────
+ 
+@app.post(
+    "/gemini/session/reset",
+    summary="[Gemini] Reset a Gemini conversation session",
+)
+def gemini_session_reset(session_id: str = Form(...)):
+    """
+    Reset a Gemini session — starts a fresh conversation.
+    Creates a new MongoDB document for the new session.
+    """
+    # Create fresh engine for this session_id
+    engine = GeminiEngine.from_config(_load_config())
+    engine.new_session(session_id)
+    _gemini_sessions[session_id] = engine
+ 
+    greeting = engine.greeting()
+    return {
+        "session_id": session_id,
+        "greeting":   greeting,
+        "engine":     "gemini",
+        "status":     "reset",
+    }
+ 
+ 
+# ── 4. Gemini Session State ────────────────────────────────────────────────────
+ 
+@app.get(
+    "/gemini/session/{session_id}/state",
+    summary="[Gemini] Get current Gemini session state",
+)
+def gemini_session_state(session_id: str):
+    """
+    Get the current state of a Gemini session.
+    Returns phase, energy_node, turn_count, commitment_status, etc.
+    """
+    if session_id not in _gemini_sessions:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Gemini session '{session_id}' not found. "
+                   f"Start one with POST /gemini/session/greeting",
+        )
+    engine = _gemini_sessions[session_id]
+    return {
+        **engine.diagnosis_summary,
+        "engine": "gemini",
+        "solution_step": (
+            engine.state.solution_step if engine.state else None
+        ),
+        "solution_complete": (
+            engine.state.solution_complete if engine.state else False
+        ),
+    }
+ 
+ 
+# ── 5. Gemini Health Check ─────────────────────────────────────────────────────
+ 
+@app.get(
+    "/gemini/health",
+    summary="[Gemini] Health check — Gemini API + MongoDB",
+)
+def gemini_health():
+    """
+    Check if Gemini API key is configured and MongoDB is reachable.
+    Does NOT make a real Gemini API call (saves cost) — just checks config.
+    """
+    gemini_key_set = bool(_os.environ.get("GEMINI_API_KEY", "").strip())
+    mongo_ok       = _mongo.is_connected()
+ 
+    active_sessions = len(_gemini_sessions)
+ 
+    status = "ok" if (gemini_key_set and mongo_ok) else "degraded"
+ 
+    return {
+        "status":              status,
+        "gemini_key_set":      gemini_key_set,
+        "mongodb_connected":   mongo_ok,
+        "active_sessions":     active_sessions,
+        "flash_model":         _os.environ.get("GEMINI_FLASH_MODEL", "gemini-2.5-flash-preview-05-20"),
+        "pro_model":           _os.environ.get("GEMINI_PRO_MODEL",   "gemini-2.5-pro-preview-05-06"),
+        "engine":              "gemini",
+    }
