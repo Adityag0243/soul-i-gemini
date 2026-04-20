@@ -152,7 +152,20 @@ aws-api-test:
 	@echo "Testing API at http://$(AWS_PUBLIC_IP):8000"
 	curl -s http://$(AWS_PUBLIC_IP):8000/health | python3 -m json.tool
 
-
+# Start just the voice worker (useful when everything else is already running)
+aws-voice-up:
+	ssh $(EC2_SSH_OPTS) $(EC2_HOST) \
+	    'cd $(EC2_DIR) && docker compose -f docker-compose.aws.yml up -d souli-voice'
+ 
+# Watch voice worker logs live — you'll see every turn with latency numbers
+aws-voice-logs:
+	ssh $(EC2_SSH_OPTS) $(EC2_HOST) \
+	    'cd $(EC2_DIR) && docker compose -f docker-compose.aws.yml logs -f souli-voice'
+ 
+# Restart only the voice worker (without touching other services)
+aws-voice-restart:
+	ssh $(EC2_SSH_OPTS) $(EC2_HOST) \
+	    'cd $(EC2_DIR) && docker compose -f docker-compose.aws.yml restart souli-voice'
 # ═══════════════════════════════════════════════════════════════════════════════
 # GCP — GCE VM Management (legacy — kept for backward compatibility)
 # ═══════════════════════════════════════════════════════════════════════════════
