@@ -353,17 +353,23 @@ class GeminiEngine:
         )
 
         # ── Call Gemini Pro ───────────────────────────────────────────────────
-        try:
-            result = self._pro().chat_json(
-                system=SOLUTION_SYSTEM,
-                messages=[{"role": "user", "content": context}],
-            )
-        except Exception as exc:
-            logger.error("[GeminiEngine] Pro solution step failed: %s", exc)
-            return (
-                "Let's take a gentle breath together. What are you feeling right now?",
-                {"error": str(exc), "phase": PHASE_SOLUTION},
-            )
+        # Try up to 3 times on JSON parse error
+        for attempt in range(3):
+            try:
+                result = self._pro().chat_json(
+                    system=SOLUTION_SYSTEM,
+                    messages=[{"role": "user", "content": context}],
+                )
+                break  # success
+            except Exception as exc:
+                if attempt == 2:
+                    logger.error("[GeminiEngine] Pro solution step failed: %s", exc)
+                    return (
+                        "Let's take a gentle breath together. What are you feeling right now?",
+                        {"error": str(exc), "phase": PHASE_SOLUTION},
+                    )
+                logger.warning("[GeminiEngine] Pro retry %d: %s", attempt + 1, exc)
+                import time; time.sleep(1)
 
         # ── Parse step result ─────────────────────────────────────────────────
         step_id         = result.get("step_id", f"step_{s.solution_step}")

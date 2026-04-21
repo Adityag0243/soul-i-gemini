@@ -1,0 +1,20 @@
+# voice_requirements.txt
+# Install these ON TOP of local_requirements.txt
+
+# LiveKit
+livekit>=0.11
+livekit-agents>=0.8
+
+# Deepgram STT (pinned to 3.7.0 — v6 has breaking API changes)
+deepgram-sdk==3.7.0
+
+# Edge TTS (Microsoft, free)
+edge-tts>=6.1.9
+
+# Audio decode: MP3 → PCM (critical — without this LiveKit gets silence)
+pydub>=0.25.1
+
+# ffmpeg is needed by pydub for MP3 decoding
+# On Windows: download from https://ffmpeg.org/download.html
+#             add to PATH
+# On EC2/Linux: sudo apt install ffmpeg
