@@ -225,6 +225,11 @@ def _safe_header(text: str) -> str:
     """Strip non-latin-1 chars so HTTP headers don't blow up on em-dashes, smart quotes etc."""
     return text.encode("latin-1", errors="replace").decode("latin-1")
 
+
+@app.get("/health", summary="Health check")
+def health():
+    return {"status": "ok", "engine": "gemini"}
+
 # ── 2. Voice Chat ─────────────────────────────────────────────────────────────
 
 @app.post(
