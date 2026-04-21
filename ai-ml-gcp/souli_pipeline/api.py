@@ -201,7 +201,7 @@ def chat(req: ChatRequest):
     if not req.message.strip():
         raise HTTPException(status_code=400, detail="message cannot be empty")
 
-    engine = _get_or_create_engine(req.session_id)
+    engine = _get_or_create_gemini_engine(req.session_id)  # <-- use Gemini engine for /chat as well
 
     try:
         reply = engine.turn(req.message)
@@ -275,7 +275,7 @@ async def voice(
         raise HTTPException(status_code=422, detail="Could not transcribe audio — please try again")
 
     # Conversation engine turn
-    engine = _get_or_create_engine(session_id)
+    engine = _get_or_create_gemini_engine(session_id)
     try:
         reply = engine.turn(transcript)
     except Exception as exc:
@@ -321,7 +321,7 @@ def reset_session(session_id: str = Form(...)):
         _sessions[session_id].reset()
         engine = _sessions[session_id]
     else:
-        engine = _get_or_create_engine(session_id)
+        engine = _get_or_create_gemini_engine(session_id)
 
     greeting = engine.greeting()
     return ResetResponse(
@@ -452,7 +452,7 @@ def greeting(session_id: str = Form(...)):
     Get Souli's opening greeting for a brand new session.
     Call this when the user opens the app for the first time or after a reset.
     """
-    engine = _get_or_create_engine(session_id)
+    engine = _get_or_create_gemini_engine(session_id)  # <-- use Gemini engine for greeting as well
     greet_text = engine.greeting()
     return ChatResponse(
         session_id=session_id,
