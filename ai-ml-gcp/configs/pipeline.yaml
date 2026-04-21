@@ -134,7 +134,7 @@ voice:
   livekit_api_secret: "secret"
   room_name: "souli-room"
   # STT: "whisper" (local, no API key) | "deepgram" (cloud, needs DEEPGRAM_API_KEY)
-  stt_provider: "whisper"
+  stt_provider: "deepgram" 
   whisper_model: "base"
   # TTS: "edge_tts" (free Microsoft) | "piper" (fully local)
   tts_provider: "edge_tts"
