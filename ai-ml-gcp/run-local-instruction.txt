@@ -1,0 +1,33 @@
+(vertex ai part.....)
+# Command 1 — Google account se login karo 
+gcloud auth application-default login
+# Browser khulega → apna Google account select karo → Allow karo
+
+# Command 2 — GCP project set karo
+gcloud auth application-default set-quota-project omega-pivot-480803-c9
+
+
+# credential save hoga
+Windows: C:\Users\mradi\AppData\Roaming\gcloud\application_default_credentials.json
+
+
+
+
+
+
+
+
+
+
+# Step 1 — .env mein ye add karo (agar nahi hai)
+GCLOUD_CONFIG_DIR=C:\Users\mradi\AppData\Roaming\gcloud
+
+# Step 2 — Build karo
+cd C:\Users\mradi\Downloads\soul-i\ai-ml-gcp
+docker compose -f docker-compose.local.yml --env-file .env build
+
+# Step 3 — Start karo
+docker compose -f docker-compose.local.yml --env-file .env up -d
+
+# Step 4 — Logs dekho
+docker compose -f docker-compose.local.yml logs -f
