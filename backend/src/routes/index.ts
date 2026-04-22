@@ -4,6 +4,7 @@ import { apiKeyMiddleware } from '../middlewares/api-key.middleware';
 import permission from '../middlewares/permission.middleware';
 import { authRoutes as authModuleRoutes } from '../modules/auth';
 import { adminAuthRoutes } from '../modules/admin-panel/auth';
+import { contentManagementRoutes } from '../modules/admin-panel/contentManagement';
 import { chatRoutes } from '../modules/chat';
 import { voiceRoutes } from '../modules/voice';
 import { paymentRoutes } from '../modules/payments/routes/payment.routes';
@@ -26,6 +27,8 @@ router.use('/auth', authModuleRoutes);
 
 // separate admin auth routes (intentionally excluded from Swagger registration)
 router.use('/admin/auth', adminAuthRoutes);
+
+router.use('/admin/content-management', contentManagementRoutes);
 
 router.use('/chat', chatRoutes);
 
