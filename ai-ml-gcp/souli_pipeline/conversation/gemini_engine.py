@@ -353,17 +353,23 @@ class GeminiEngine:
         )
 
         # ── Call Gemini Pro ───────────────────────────────────────────────────
-        try:
-            result = self._pro().chat_json(
-                system=SOLUTION_SYSTEM,
-                messages=[{"role": "user", "content": context}],
-            )
-        except Exception as exc:
-            logger.error("[GeminiEngine] Pro solution step failed: %s", exc)
-            return (
-                "Let's take a gentle breath together. What are you feeling right now?",
-                {"error": str(exc), "phase": PHASE_SOLUTION},
-            )
+        # Try up to 3 times on JSON parse error
+        for attempt in range(3):
+            try:
+                result = self._pro().chat_json(
+                    system=SOLUTION_SYSTEM,
+                    messages=[{"role": "user", "content": context}],
+                )
+                break  # success
+            except Exception as exc:
+                if attempt == 2:
+                    logger.error("[GeminiEngine] Pro solution step failed: %s", exc)
+                    return (
+                        "Let's take a gentle breath together. What are you feeling right now?",
+                        {"error": str(exc), "phase": PHASE_SOLUTION},
+                    )
+                logger.warning("[GeminiEngine] Pro retry %d: %s", attempt + 1, exc)
+                import time; time.sleep(1)
 
         # ── Parse step result ─────────────────────────────────────────────────
         step_id         = result.get("step_id", f"step_{s.solution_step}")
@@ -430,44 +436,128 @@ class GeminiEngine:
 
     # ── Energy tagger (existing Qwen — zero change to energy_tagger.py) ───────
 
+    # def _run_energy_tagger(self) -> Optional[Dict]:
+    #     """
+    #     Calls the existing Qwen energy tagger with the user messages so far.
+    #     Qwen runs via Ollama — if Ollama is down, returns None and we fall back
+    #     to Gemini's own energy_node guess from the JSON response.
+
+    #     This is the ONLY point where Ollama is used in the Gemini engine.
+    #     If you don't have Ollama running, the engine still works — Gemini's
+    #     energy_node guess is used instead. It's less accurate but not broken.
+    #     """
+    #     try:
+    #         from souli_pipeline.youtube.energy_tagger import tag_chunk  # existing, untouched
+
+    #         # Use the last 5 user messages as tagging input
+    #         user_messages = [
+    #             m["content"] for m in self.state.messages
+    #             if m["role"] == "user"
+    #         ]
+    #         transcript = " ".join(user_messages[-5:])
+
+    #         result = tag_chunk(
+    #             text             = transcript,
+    #             ollama_model     = self.tagger_model,
+    #             ollama_endpoint  = self.ollama_endpoint,
+    #             timeout_s        = 30,
+    #         )
+    #         logger.info("[GeminiEngine] Energy tagger result: %s", result)
+    #         return result
+
+    #     except Exception as exc:
+    #         logger.warning(
+    #             "[GeminiEngine] Energy tagger failed (Ollama down?): %s — "
+    #             "Gemini's energy_node estimate will be used instead.",
+    #             exc,
+    #         )
+    #         return None
+
+    # ── RAG retrieval (existing Qdrant — zero change to qdrant_store_multi.py) ─
+        NODE_DESCRIPTIONS = {
+            "blocked_energy": (
+                "STAGNATION/FROZEN: Energy is present but completely stuck or suppressed. "
+                "The person feels numb, dead inside, or in a loop they cannot break. "
+                "Keywords: guilt, shame, 'stuck in a loop', paralysis, withdrawal from people, "
+                "procrastination from fear of pain, emotional shutdown, hiding from life."
+            ),
+            "depleted_energy": (
+                "EMPTY/EXHAUSTED FROM GIVING: The person has been over-giving to others and has nothing left for themselves. "
+                "They delay their own decisions, suppress their own feelings, carry family/relationship responsibilities, "
+                "people-please, avoid conflict, hide their struggles to appear strong. "
+                "Keywords: 'I always put others first', responsible for everyone's feelings, "
+                "fear of disappointing others, emotional suppression, choosing safe over fulfilling, "
+                "peacemaker role, hiding struggles, 'good daughter/wife/mother' image pressure."
+            ),
+            "scattered_energy": (
+                "DIFFUSE/UNFOCUSED: Energy is high but lacks a center. "
+                "Keywords: Overwhelmed by external tasks, 'busy but doing nothing,' "
+                "spinning wheels, anxiety about the to-do list, or frantic multitasking. "
+                "It is a lack of direction."
+            ),
+            "outofcontrol_energy": (
+                "VOLATILE/EXPLOSIVE: Energy is high intensity and unregulated. "
+                "Keywords: Rage, impulsivity, 'mind won't stop,' obsessive thoughts, "
+                "emotional outbursts, or physical restlessness. It is a lack of restraint."
+            ),
+            "normal_energy": (
+                "FLOW/ALIGNMENT: Energy is balanced and intentional. "
+                "Keywords: Contentment, 'ready to grow,' calm focus, purposeful action, "
+                "feeling 'in the zone,' or emotional stability. It is a state of health."
+            ),
+        }
+
+
     def _run_energy_tagger(self) -> Optional[Dict]:
         """
-        Calls the existing Qwen energy tagger with the user messages so far.
-        Qwen runs via Ollama — if Ollama is down, returns None and we fall back
-        to Gemini's own energy_node guess from the JSON response.
-
-        This is the ONLY point where Ollama is used in the Gemini engine.
-        If you don't have Ollama running, the engine still works — Gemini's
-        energy_node guess is used instead. It's less accurate but not broken.
+        Classify energy node using Gemini Flash directly.
+        No Ollama needed — replaces Qwen tagger for local + Vertex AI usage.
         """
         try:
-            from souli_pipeline.youtube.energy_tagger import tag_chunk  # existing, untouched
-
-            # Use the last 5 user messages as tagging input
             user_messages = [
                 m["content"] for m in self.state.messages
                 if m["role"] == "user"
             ]
             transcript = " ".join(user_messages[-5:])
 
-            result = tag_chunk(
-                text             = transcript,
-                ollama_model     = self.tagger_model,
-                ollama_endpoint  = self.ollama_endpoint,
-                timeout_s        = 30,
+            system = """You are an inner-energy wellness analyst working with the Souli framework.
+                Your job is to read a counseling transcript chunk and decide which energy state it addresses according to the provided descriptions.
+                Available nodes descriptions: ${NODE_DESCRIPTIONS}
+                
+                Return ONLY this JSON, nothing else:
+                {
+                "energy_node": "<one of the nodes below>",
+                "secondary_node": "<second most likely node or null>",
+                "reason": "< 25 to 30 words explanation specific to what user shared>"
+                }
+                """
+
+            result = self._flash().chat_json(
+                system=system,
+                messages=[{"role": "user", "content": f"Classify this transcript:\n{transcript}"}],
+                temperature=0.3,
             )
+
+            # Normalize node name
+            valid_nodes = [
+                "blocked_energy", "scattered_energy", "depleted_energy",
+                "outofcontrol_energy", "normal_energy"
+            ]
+            node = result.get("energy_node", "").strip().lower()
+            if node not in valid_nodes:
+                node = "blocked_energy"
+
             logger.info("[GeminiEngine] Energy tagger result: %s", result)
-            return result
+            return {
+                "energy_node": node,
+                "secondary_node": result.get("secondary_node"),
+                "reason": result.get("reason", ""),
+            }
 
         except Exception as exc:
-            logger.warning(
-                "[GeminiEngine] Energy tagger failed (Ollama down?): %s — "
-                "Gemini's energy_node estimate will be used instead.",
-                exc,
-            )
+            logger.warning("[GeminiEngine] Gemini energy tagger failed: %s", exc)
             return None
 
-    # ── RAG retrieval (existing Qdrant — zero change to qdrant_store_multi.py) ─
 
     def _fetch_solution_rag(self) -> List[Dict]:
         """

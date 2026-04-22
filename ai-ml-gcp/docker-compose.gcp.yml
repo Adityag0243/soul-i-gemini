@@ -216,5 +216,3 @@ services:
     command: [ "--config", "/etc/livekit.yaml" ]
     profiles:
       - livekit-selfhosted
-
-

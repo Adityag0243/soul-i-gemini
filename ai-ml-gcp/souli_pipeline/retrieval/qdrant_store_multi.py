@@ -82,18 +82,40 @@ _PHASE_COLLECTION_MAP: Dict[str, List[str]] = {
 # (mirrors pattern in qdrant_store_improved.py — no shared state)
 # ---------------------------------------------------------------------------
 
-def _get_qdrant_client(host: str = "localhost", port: int = 6333):
+def _get_qdrant_client(host: str = None, port: int = None):
+    import os
+    from qdrant_client import QdrantClient
+
+    api_key = os.getenv("QDRANT_API_KEY")
+    qdrant_host = host or os.getenv("QDRANT_HOST", "localhost")
+    qdrant_port = port or int(os.getenv("QDRANT_PORT", 6333))
+
     try:
-        from qdrant_client import QdrantClient
-        client = QdrantClient(host=host, port=port, timeout=5)
-        client.get_collections()
+        if api_key:
+            # Qdrant Cloud — connects to remote server with API key
+            client = QdrantClient(
+                host=qdrant_host,
+                port=qdrant_port,
+                api_key=api_key,
+                https=True,
+                timeout=10,
+            )
+        else:
+            # Local Qdrant (fallback for local dev)
+            client = QdrantClient(host=qdrant_host, port=qdrant_port, timeout=10)
+
+        client.get_collections()  # test connection
+        logger.info("Connected to Qdrant at %s", qdrant_host)
         return client
-    except Exception:
-        logger.warning("[MULTI] Qdrant not reachable at %s:%s — using in-memory.", host, port)
-        from qdrant_client import QdrantClient
-        return QdrantClient(":memory:")
 
-
+    except Exception as e:
+        raise RuntimeError(
+            f"Cannot connect to Qdrant at {qdrant_host}:{qdrant_port}. "
+            f"Check QDRANT_HOST and QDRANT_API_KEY in your .env. Error: {e}"
+        )
+        
+        
+        
 def _ensure_collection(client, collection: str):
     from qdrant_client.models import Distance, VectorParams
     existing = [c.name for c in client.get_collections().collections]

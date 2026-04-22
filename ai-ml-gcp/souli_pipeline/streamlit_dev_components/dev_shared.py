@@ -10,7 +10,8 @@ Shared helpers used by ALL components:
   - Phase / node label maps
 """
 from __future__ import annotations
-
+from dotenv import load_dotenv
+load_dotenv()
 import os
 import sys
 from pathlib import Path
@@ -25,10 +26,8 @@ if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
 # ── Config paths (read from env or default) ───────────────────────────────────
-CONFIG_PATH = os.environ.get(
-    "SOULI_CONFIG_PATH",
-    str(_project_root / "configs" / "pipeline.gcp.yaml"),
-)
+CONFIG_PATH = os.environ.get("SOULI_CONFIG_PATH", "configs/pipeline.yaml")
+
 
 def _find_latest_gold() -> str | None:
     outputs_dir = "outputs"

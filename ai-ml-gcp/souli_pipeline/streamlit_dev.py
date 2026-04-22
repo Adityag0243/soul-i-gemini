@@ -15,6 +15,8 @@ from __future__ import annotations
 
 # ── PATH FIX — must be first ──────────────────────────────────────────────────
 import sys
+from dotenv import load_dotenv
+load_dotenv()
 import os
 from pathlib import Path
 
@@ -86,7 +88,7 @@ if _page == "🤖 Gemini Engine":
     _gfile = str(Path(__file__).parent.parent / "pages" / "gemini_dev.py")
     if _gpath not in sys.path:
         sys.path.insert(0, _gpath)
-    with open(_gfile) as _f:
+    with open(_gfile, encoding="utf-8") as _f:
         exec(compile(_f.read(), _gfile, "exec"), {"__name__": "__main__"})
     st.stop()
 
