@@ -3,6 +3,7 @@ import healthRoutes from './health/index';
 import { apiKeyMiddleware } from '../middlewares/api-key.middleware';
 import permission from '../middlewares/permission.middleware';
 import { authRoutes as authModuleRoutes } from '../modules/auth';
+import { adminAuthRoutes } from '../modules/admin-panel/auth';
 import { chatRoutes } from '../modules/chat';
 import { voiceRoutes } from '../modules/voice';
 import { paymentRoutes } from '../modules/payments/routes/payment.routes';
@@ -22,6 +23,9 @@ router.use(permission(Permission.GENERAL) as RequestHandler);
 
 // modular auth routes
 router.use('/auth', authModuleRoutes);
+
+// separate admin auth routes (intentionally excluded from Swagger registration)
+router.use('/admin/auth', adminAuthRoutes);
 
 router.use('/chat', chatRoutes);
 
