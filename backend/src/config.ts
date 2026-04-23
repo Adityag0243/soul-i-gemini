@@ -111,6 +111,15 @@ export const paymentConfig = {
     subscriptionReminderDays: parseInt(
         process.env.SUBSCRIPTION_REMINDER_DAYS || '7',
     ),
+
+    // temporary static coupon for app launch free access
+    trialCouponCode: process.env.TRIAL_COUPON_CODE || 'TESTNEW',
+    trialCouponEnabled:
+        (process.env.TRIAL_COUPON_ENABLED || 'true').toLowerCase() === 'true',
+    trialCouponValidityDays: parseInt(
+        process.env.TRIAL_COUPON_VALIDITY_DAYS || '3650',
+        10,
+    ),
 };
 
 // configure SES for export (backward compatibility)

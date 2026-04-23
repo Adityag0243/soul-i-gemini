@@ -14,6 +14,7 @@ import {
     CancelSubscriptionInput,
     GetSubscriptionHistoryInput,
     GetPaymentHistoryInput,
+    RedeemCouponInput,
 } from '../schemas/payment.schema';
 
 /**
@@ -140,6 +141,20 @@ export async function getPaymentHistory(
     );
 
     new SuccessResponse('Payment history retrieved', history).send(res);
+}
+
+/**
+ * Redeem static launch coupon
+ * POST /payments/coupon/redeem
+ */
+export async function redeemCoupon(
+    req: ProtectedRequest,
+    res: Response,
+): Promise<void> {
+    const body = req.body as RedeemCouponInput;
+    const result = await subscriptionService.redeemCoupon(req.user!.id, body);
+
+    new SuccessResponse(result.message, result.data).send(res);
 }
 
 /**
