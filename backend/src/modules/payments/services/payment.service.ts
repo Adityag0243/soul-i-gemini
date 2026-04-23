@@ -264,7 +264,9 @@ class SubscriptionService {
         const expectedCode = paymentConfig.trialCouponCode.trim().toUpperCase();
 
         if (!paymentConfig.trialCouponEnabled) {
-            throw new BadRequestError('Coupon redemption is currently disabled');
+            throw new BadRequestError(
+                'Coupon redemption is currently disabled',
+            );
         }
 
         if (submittedCode !== expectedCode) {
@@ -309,12 +311,13 @@ class SubscriptionService {
             expiresAt.getDate() + paymentConfig.trialCouponValidityDays,
         );
 
-        const createdSubscription = await subscriptionRepository.createSubscription({
-            userId,
-            planId: plan.id,
-            status: 'FREE',
-            currentPeriodEnd: expiresAt,
-        });
+        const createdSubscription =
+            await subscriptionRepository.createSubscription({
+                userId,
+                planId: plan.id,
+                status: 'FREE',
+                currentPeriodEnd: expiresAt,
+            });
 
         logger.info('Static coupon redeemed successfully', {
             userId,

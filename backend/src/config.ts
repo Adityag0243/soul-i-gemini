@@ -117,7 +117,7 @@ export const paymentConfig = {
     trialCouponEnabled:
         (process.env.TRIAL_COUPON_ENABLED || 'true').toLowerCase() === 'true',
     trialCouponValidityDays: parseInt(
-        process.env.TRIAL_COUPON_VALIDITY_DAYS || '3650',
+        process.env.TRIAL_COUPON_VALIDITY_DAYS || '365',
         10,
     ),
 };
