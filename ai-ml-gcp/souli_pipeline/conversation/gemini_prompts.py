@@ -53,7 +53,7 @@ Phase: greeting
   Move to: intake after user's first real response if user share his name or something meaningful do remember and use it if seems important.
 
 Phase: intake
-  When: Understanding the surface of what's going on.
+  When: Understanding the surface of what's going on usually initial one or two turns only.
   Do: Acknowledge user's input. Ask gentle clarifying questions. ONE per turn. No advice.
   Move to: deepening when you have a clear picture.
   Move to: venting if user is clearly just releasing emotions.
@@ -245,9 +245,9 @@ def build_solution_context(
     This goes in as the user message so Gemini has full context
     about the user's state, the practice content, and where we are in the flow.
     """
-    # Format RAG chunks — max 4, cap text at 500 chars each
+    # Format RAG chunks — max 6, cap text at 500 chars each
     rag_parts = []
-    for i, c in enumerate(rag_chunks[:4], 1):
+    for i, c in enumerate(rag_chunks[:6], 1):
         chunk_type = c.get("chunk_type", "activity").upper()
         source     = c.get("source_video", "")
         text       = c.get("text", "")[:500]
