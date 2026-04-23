@@ -1,7 +1,22 @@
-import { ChatMessage, MessageRole, CrisisLevel } from '@prisma/client';
+import {
+    ChatMessage,
+    MessageRole,
+    CrisisLevel,
+    PracticeStatus,
+} from '@prisma/client';
 import { aiServiceConfig } from '../../../config';
 import logger from '../../../core/logger';
 import { InternalError } from '../../../core/api-error';
+import { prisma } from '../../../database';
+
+type PracticeContextItem = {
+    title: string;
+    description: string;
+    durationMinutes: number;
+    practiceType: string;
+    mediaType: 'AUDIO' | 'VIDEO';
+    tags: string[];
+};
 
 // Types for Ollama API
 interface OllamaChatMessage {
@@ -61,7 +76,7 @@ export interface AIResponse {
 }
 
 // system prompt for Souli AI - emotional wellness companion
-const SOULI_SYSTEM_PROMPT = `You are Souli, an empathetic AI emotional wellness companion. Your role is to:
+const BASE_SOULI_SYSTEM_PROMPT = `You are Souli, an empathetic AI emotional wellness companion. Your role is to:
 
 1. LISTEN with empathy and without judgment
 2. VALIDATE the user's feelings and experiences
@@ -82,6 +97,53 @@ IMPORTANT GUIDELINES:
 
 You are not a therapist. You are a supportive companion for daily emotional well-being.`;
 
+function formatPracticeCatalog(practices: PracticeContextItem[]): string {
+    if (practices.length === 0) {
+        return 'No active practices are currently available.';
+    }
+
+    return practices
+        .map(
+            (practice, index) =>
+                `${index + 1}. ${practice.title} | type: ${practice.practiceType} | duration: ${practice.durationMinutes} min | media: ${practice.mediaType.toLowerCase()} | tags: ${practice.tags.join(', ') || 'none'} | description: ${practice.description}`,
+        )
+        .join('\n');
+}
+
+function buildPracticeAwareSystemPrompt(
+    practices: PracticeContextItem[],
+): string {
+    return `${BASE_SOULI_SYSTEM_PROMPT}
+
+ACTIVE PRACTICES CATALOG:
+${formatPracticeCatalog(practices)}
+
+PRACTICE SUGGESTION RULES:
+- Only suggest practices from the active catalog above.
+- Never suggest archived, inactive, or deleted practices.
+- Match the suggestion to the user's emotional state and keep it natural.
+- If no practice fits, respond supportively without forcing a suggestion.`;
+}
+
+async function getActivePracticeContext(): Promise<PracticeContextItem[]> {
+    return prisma.practiceTask.findMany({
+        where: {
+            status: PracticeStatus.ACTIVE,
+            isActive: true,
+            suggestToAi: true,
+        },
+        orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
+        select: {
+            title: true,
+            description: true,
+            durationMinutes: true,
+            practiceType: true,
+            mediaType: true,
+            tags: true,
+        },
+    });
+}
+
 //convert database message role to Ollama role
 
 function toOllamaRole(role: MessageRole): 'user' | 'assistant' | 'system' {
@@ -101,11 +163,12 @@ function toOllamaRole(role: MessageRole): 'user' | 'assistant' | 'system' {
 
 function buildConversationHistory(
     messages: ChatMessage[],
+    practiceContext: PracticeContextItem[],
 ): OllamaChatMessage[] {
     const history: OllamaChatMessage[] = [
         {
             role: 'system',
-            content: SOULI_SYSTEM_PROMPT,
+            content: buildPracticeAwareSystemPrompt(practiceContext),
         },
     ];
 
@@ -453,13 +516,20 @@ export async function generateResponse(
     userMessage: string,
     sessionId: string,
 ): Promise<AIResponse> {
+    const practiceContext = await getActivePracticeContext();
+    const practicePrompt = buildPracticeAwareSystemPrompt(practiceContext);
+    const augmentedUserMessage = `${practicePrompt}\n\nUSER MESSAGE:\n${userMessage}`;
+
     // Detect crisis level and emotion from user message
     const crisisLevel = detectCrisisLevel(userMessage);
     const detectedEmotion = detectEmotion(userMessage);
 
     try {
         // Preferred mode: call Souli API deployed by AI team
-        const response = await callSouliChatAPI(userMessage, sessionId);
+        const response = await callSouliChatAPI(
+            augmentedUserMessage,
+            sessionId,
+        );
 
         return {
             content: response.reply,
@@ -489,7 +559,10 @@ export async function generateResponse(
 
     // Backward compatibility mode for local Ollama setup
     try {
-        const messages = buildConversationHistory(conversationHistory);
+        const messages = buildConversationHistory(
+            conversationHistory,
+            practiceContext,
+        );
         messages.push({
             role: 'user',
             content: userMessage,

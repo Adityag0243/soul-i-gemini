@@ -64,6 +64,16 @@ enum PaymentStatus {
   REFUNDED
 }
 
+enum PracticeMediaType {
+  AUDIO
+  VIDEO
+}
+
+enum PracticeStatus {
+  ACTIVE
+  ARCHIVED
+}
+
 enum FeedbackType {
   BETTER
   SAME
@@ -257,6 +267,36 @@ model ChatMessage {
   @@index([sessionId])
   @@index([sessionId, createdAt])
   @@map("chat_messages")
+}
+
+model PracticeTask {
+  id                String            @id @default(uuid()) @db.Uuid
+  title             String
+  description       String            @db.Text
+  durationMinutes   Int               @map("duration_minutes")
+  practiceType      String            @map("practice_type")
+  mediaType         PracticeMediaType  @map("media_type")
+  mediaUrl          String?           @map("media_url")
+  mediaKey          String?           @map("media_key")
+  mediaBucket       String?           @map("media_bucket")
+  mediaOriginalName String?           @map("media_original_name")
+  mediaMimeType     String?           @map("media_mime_type")
+  mediaSizeBytes    Int?              @map("media_size_bytes")
+  tags              String[]          @default([])
+  status            PracticeStatus    @default(ACTIVE)
+  isActive          Boolean           @default(true) @map("is_active")
+  suggestToAi       Boolean           @default(true) @map("suggest_to_ai")
+  sourceSheetName   String?           @map("source_sheet_name")
+  createdByAdminId  Int?              @map("created_by_admin_id")
+  deletedAt         DateTime?         @map("deleted_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@index([status, isActive, suggestToAi])
+  @@index([mediaType, isActive])
+  @@index([practiceType])
+  @@map("practice_tasks")
 }
 
 // EMOTIONAL SYSTEM
