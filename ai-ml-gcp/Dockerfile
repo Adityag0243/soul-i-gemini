@@ -16,10 +16,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     curl \
     mpg123 \
-    nodejs \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
     && ln -sf /usr/bin/python3.11 /usr/bin/python3 \
-    && ln -sf /usr/bin/python3.11 /usr/bin/python \
-    && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 # Install Python deps first (layer cache)
 COPY requirements.txt /app/requirements.txt
