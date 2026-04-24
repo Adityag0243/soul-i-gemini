@@ -79,7 +79,7 @@ _PHASE_COLLECTION_MAP: Dict[str, List[str]] = {
 
 # ---------------------------------------------------------------------------
 # Qdrant client + collection helpers
-# (mirrors pattern in qdrant_store_improved.py — no shared state)
+# (mirrors pattern in qdrant_store_improved.py — no shared state....)
 # ---------------------------------------------------------------------------
 
 def _get_qdrant_client(host: str = None, port: int = None):
@@ -91,17 +91,17 @@ def _get_qdrant_client(host: str = None, port: int = None):
     qdrant_port = port or int(os.getenv("QDRANT_PORT", 6333))
 
     try:
-        if api_key:
+        if api_key and qdrant_host != "localhost":
             # Qdrant Cloud — connects to remote server with API key
             client = QdrantClient(
-                host=qdrant_host,
-                port=qdrant_port,
+                url=f"https://{qdrant_host}",
                 api_key=api_key,
-                https=True,
-                timeout=10,
+                timeout=30,
             )
         else:
             # Local Qdrant (fallback for local dev)
+            logger.info("Connecting to local Qdrant at %s:%d", qdrant_host, qdrant_port)    
+            qdrant_port = port or int(os.getenv("QDRANT_PORT", 6333))
             client = QdrantClient(host=qdrant_host, port=qdrant_port, timeout=10)
 
         client.get_collections()  # test connection
