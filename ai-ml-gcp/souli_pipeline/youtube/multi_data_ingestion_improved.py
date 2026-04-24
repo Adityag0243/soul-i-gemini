@@ -4,14 +4,16 @@ souli_pipeline/youtube/multi_data_ingestion_improved.py
 Multi-collection ingestion pipeline — runs everything in one click.
 
 Builds on pipeline_improved.py's core steps (Whisper → segment → clean)
-and adds a parallel extraction layer that populates 6 Qdrant collections:
+and adds a parallel extraction layer that populates 7 Qdrant collections:
 
-  souli_chunks_improved  — general semantic search (existing, reused)
-  souli_healing          — healing principles
-  souli_activities       — practices and exercises
-  souli_stories          — metaphors, stories, signature phrases
-  souli_commitment       — readiness challenge questions
-  souli_patterns         — problem pattern descriptions
+  souli_chunks_improved    — general semantic search (existing, reused)
+  souli_healing            — healing principles
+  souli_activities_quick   — quick relief practices (under ~10 min)  ← NEW
+  souli_activities_deep    — deeper practices (10 min+)              ← NEW
+  souli_activities         — legacy fallback for chunks without energy_type
+  souli_stories            — metaphors, stories, signature phrases
+  souli_commitment         — readiness challenge questions
+  souli_patterns           — problem pattern descriptions
 
 Flow:
   URL
@@ -25,18 +27,20 @@ Flow:
   → Step 8: Typed collection ingest        (NEW: qdrant_store_multi.ingest_all_extractor_outputs)
 
 Outputs per video (in out_dir):
-  whisper_segments.xlsx          — raw Whisper output
-  paragraphs.xlsx                — grouped paragraphs
-  topic_segments.xlsx            — topic boundaries
-  cleaned_chunks.xlsx            — LLM-cleaned prose per topic
-  cleaned_chunks_tagged.xlsx     — with energy_node column
-  density_report.json            — content density detection result
-  extracted_healing.xlsx         — healing principle chunks
-  extracted_activities.xlsx      — activity chunks
-  extracted_stories.xlsx         — story/phrase chunks
-  extracted_commitment.xlsx      — commitment prompt chunks
-  extracted_patterns.xlsx        — problem pattern chunks
-  ingest_summary.json            — counts per collection
+  whisper_segments.xlsx            — raw Whisper output
+  paragraphs.xlsx                  — grouped paragraphs
+  topic_segments.xlsx              — topic boundaries
+  cleaned_chunks.xlsx              — LLM-cleaned prose per topic
+  cleaned_chunks_tagged.xlsx       — with energy_node column
+  density_report.json              — content density detection result
+  extracted_healing.xlsx           — healing principle chunks
+  extracted_activities.xlsx        — activity chunks (all, before split)
+  extracted_activities_quick.xlsx  — quick relief activities only
+  extracted_activities_deep.xlsx   — deeper practice activities only
+  extracted_stories.xlsx           — story/phrase chunks
+  extracted_commitment.xlsx        — commitment prompt chunks
+  extracted_patterns.xlsx          — problem pattern chunks
+  ingest_summary.json              — counts per collection
 
 ZERO changes to pipeline_improved.py or any existing file.
 """
@@ -159,36 +163,33 @@ def run_multi_ingestion_pipeline(
     df_topics.to_excel(path_topics, index=False)
     outputs["topic_segments"] = path_topics
 
-    logger.info("[MULTI] %d topic segments from %d paragraphs", len(topic_segments), len(paragraphs))
+    logger.info(
+        "[MULTI] %d topic segments from %d paragraphs", len(topic_segments), len(paragraphs)
+    )
 
     if not topic_segments:
         logger.warning("[MULTI] No topic segments — aborting.")
         return outputs
 
-    # LLM cleaning
-    cleaned_results = clean_all_segments(
+    # Clean segments
+    cleaned_chunks = clean_all_segments(
         topic_segments=topic_segments,
         ollama_model=c.chat_model,
         ollama_endpoint=c.ollama_endpoint,
         num_ctx=num_ctx_processing,
-        temperature=0.3,
     )
 
-    # Attach source metadata
-    for item in cleaned_results:
-        item["source_video"] = source_label or youtube_url
-        item["youtube_url"]  = youtube_url
-
-    df_cleaned = pd.DataFrame(cleaned_results)
+    df_cleaned = pd.DataFrame(cleaned_chunks)
     path_cleaned = os.path.join(out_dir, "cleaned_chunks.xlsx")
     df_cleaned.to_excel(path_cleaned, index=False)
     outputs["cleaned_chunks"] = path_cleaned
-    logger.info("[MULTI] Cleaned chunks saved: %d rows", len(df_cleaned))
+    logger.info("[MULTI] Cleaning done: %d chunks", len(df_cleaned))
 
-    # Build full transcript string — used for density detection + extractors
-    full_transcript = " ".join(
-        item.get("cleaned_text", "") for item in cleaned_results
-    ).strip()
+    # Build full transcript for extractors (join cleaned texts)
+    text_col = "cleaned_text" if "cleaned_text" in df_cleaned.columns else "text"
+    full_transcript = "\n\n".join(
+        df_cleaned[text_col].dropna().astype(str).tolist()
+    )
 
     # ------------------------------------------------------------------
     # Step 3 — Persona extraction  (existing, unchanged)
@@ -196,93 +197,71 @@ def run_multi_ingestion_pipeline(
     if not skip_persona:
         logger.info("[MULTI] Step 3/8 — Persona extraction...")
         try:
-            from souli_pipeline.youtube.persona_extractor import (
-                extract_from_video,
-                update_persona_file,
-            )
-            snippet = extract_from_video(
-                cleaned_transcript=full_transcript,
+            from souli_pipeline.youtube.persona_extractor import extract_and_update_persona
+            extract_and_update_persona(
+                cleaned_chunks=cleaned_chunks,
+                persona_path=persona_path,
                 ollama_model=c.chat_model,
                 ollama_endpoint=c.ollama_endpoint,
-                num_ctx=num_ctx_processing,
             )
-            if snippet:
-                snippet_path = os.path.join(out_dir, "persona_snippet.txt")
-                with open(snippet_path, "w", encoding="utf-8") as f:
-                    f.write(snippet)
-                outputs["persona_snippet"] = snippet_path
-                update_persona_file(
-                    persona_path=persona_path,
-                    new_snippet=snippet,
-                    ollama_model=c.chat_model,
-                    ollama_endpoint=c.ollama_endpoint,
-                    num_ctx=num_ctx_processing,
-                )
-                outputs["coach_persona"] = persona_path
-                logger.info("[MULTI] Persona updated at %s", persona_path)
-            else:
-                logger.warning("[MULTI] No persona snippet extracted.")
+            outputs["persona"] = persona_path
         except Exception as exc:
-            logger.warning("[MULTI] Persona extraction failed: %s — continuing.", exc)
+            logger.warning("[MULTI] Persona extraction failed: %s", exc)
     else:
         logger.info("[MULTI] Step 3/8 — Persona extraction skipped.")
 
     # ------------------------------------------------------------------
     # Step 4 — Energy node tagging  (existing, unchanged)
     # ------------------------------------------------------------------
-    logger.info("[MULTI] Step 4/8 — Energy node tagging (%d chunks)...", len(df_cleaned))
+    logger.info("[MULTI] Step 4/8 — Energy node tagging...")
     detected_node: Optional[str] = None
 
     try:
         from souli_pipeline.youtube.energy_tagger import tag_dataframe
-
-        df_cleaned = tag_dataframe(
-            df_cleaned,
-            text_col="cleaned_text",
+        df_tagged = tag_dataframe(
+            df=df_cleaned,
+            text_col=text_col,
             ollama_model=c.tagger_model,
             ollama_endpoint=c.ollama_endpoint,
         )
+        path_tagged = os.path.join(out_dir, "cleaned_chunks_tagged.xlsx")
+        df_tagged.to_excel(path_tagged, index=False)
+        outputs["cleaned_chunks_tagged"] = path_tagged
 
-        tagged_path = os.path.join(out_dir, "cleaned_chunks_tagged.xlsx")
-        df_cleaned.to_excel(tagged_path, index=False)
-        outputs["cleaned_chunks_tagged"] = tagged_path
-
-        # Pick the most common node across chunks as the video's dominant node
-        if "energy_node" in df_cleaned.columns:
-            node_counts = df_cleaned["energy_node"].value_counts()
-            if not node_counts.empty:
-                detected_node = node_counts.index[0]
-                logger.info("[MULTI] Dominant energy node detected: %s", detected_node)
-
-        tagged_count = df_cleaned["energy_node"].notna().sum()
-        logger.info("[MULTI] Energy tagging done: %d tagged", tagged_count)
-
+        # Most common node across all chunks = dominant node for this video
+        if "energy_node" in df_tagged.columns:
+            detected_node = df_tagged["energy_node"].mode().iloc[0]
+            logger.info("[MULTI] Dominant energy node: %s", detected_node)
+        df_cleaned = df_tagged
     except Exception as exc:
-        logger.warning("[MULTI] Energy tagging failed: %s — continuing without node.", exc)
+        logger.warning("[MULTI] Energy tagging failed: %s", exc)
+        path_tagged = path_cleaned
 
     # ------------------------------------------------------------------
-    # Step 5 — General ingest → souli_chunks_improved  (existing function, new call)
+    # Step 5 — General ingest  (existing, unchanged)
     # ------------------------------------------------------------------
-    if not skip_ingest and not df_cleaned.empty:
+    n_general = 0
+
+    if not skip_ingest:
         logger.info("[MULTI] Step 5/8 — General ingest → '%s'...", general_collection)
         try:
             from souli_pipeline.retrieval.qdrant_store_improved import ingest_improved_chunks
+            df_for_ingest = df_cleaned.copy()
+            df_for_ingest["source_video"] = source_label or youtube_url
+            df_for_ingest["youtube_url"]  = youtube_url
 
             n_general = ingest_improved_chunks(
-                df=df_cleaned,
+                df=df_for_ingest,
                 collection=general_collection,
                 embedding_model=r.embedding_model or "sentence-transformers/all-MiniLM-L6-v2",
                 host=r.qdrant_host,
                 port=r.qdrant_port,
             )
             logger.info("[MULTI] General ingest done: %d chunks → '%s'", n_general, general_collection)
-            outputs["general_ingested_count"] = str(n_general)
         except Exception as exc:
             logger.warning("[MULTI] General ingest failed: %s", exc)
-            n_general = 0
     else:
-        logger.info("[MULTI] Step 5/8 — General ingest skipped.")
-        n_general = 0
+        logger.info("[MULTI] Step 5/8 — General ingest skipped (skip_ingest=True).")
 
     # ------------------------------------------------------------------
     # Step 6 — Content density detection  (NEW)
@@ -297,7 +276,6 @@ def run_multi_ingestion_pipeline(
         ollama_endpoint=c.ollama_endpoint,
     )
 
-    # Save density report for inspection
     density_path = os.path.join(out_dir, "density_report.json")
     with open(density_path, "w", encoding="utf-8") as f:
         json.dump(density_report, f, indent=2)
@@ -329,9 +307,9 @@ def run_multi_ingestion_pipeline(
     )
 
     # ── Re-tag each extracted chunk with energy_tagger (Qwen) ──────────────
-    # The extractor stamped all chunks with one fixed detected_node.
+    # The extractor stamps all chunks with one fixed detected_node.
     # We now run each chunk's text through energy_tagger so every chunk
-    # gets its own accurate node based on its actual content.
+    # gets its own accurate node based on actual content.
     try:
         from souli_pipeline.youtube.energy_tagger import tag_chunk
         logger.info("[MULTI] Re-tagging extracted chunks with Qwen energy_tagger...")
@@ -349,25 +327,70 @@ def run_multi_ingestion_pipeline(
         logger.info("[MULTI] Re-tagging done.")
     except Exception as exc:
         logger.warning("[MULTI] Re-tagging failed (%s) — keeping extractor-assigned nodes.", exc)
-    
+
+    # Stamp source info onto every chunk
     for chunk_type, chunks in extractor_outputs.items():
         for chunk in chunks:
             chunk["source_video"] = source_label or youtube_url
             chunk["youtube_url"]  = youtube_url
-            
+
+    # ------------------------------------------------------------------
+    # Save extractor outputs to Excel
+    # All activities go to extracted_activities.xlsx (full view).
+    # Quick and deep are also saved as separate files for inspection.
+    # ------------------------------------------------------------------
     extractor_excels: Dict[str, str] = {}
+
     for chunk_type, chunks in extractor_outputs.items():
         if chunks:
-            df_ext = pd.DataFrame(chunks)
+            df_ext  = pd.DataFrame(chunks)
             ext_path = os.path.join(out_dir, f"extracted_{chunk_type}.xlsx")
             df_ext.to_excel(ext_path, index=False)
             extractor_excels[chunk_type] = ext_path
             outputs[f"extracted_{chunk_type}"] = ext_path
-            logger.info("[MULTI] Saved %d %s chunks → %s", len(chunks), chunk_type, ext_path)
+            logger.info(
+                "[MULTI] Saved %d %s chunks → %s", len(chunks), chunk_type, ext_path
+            )
+
+            # ── Extra split files for activities ─────────────────────────
+            # Makes it easy to inspect in Streamlit which went quick vs deep.
+            if chunk_type == "activities":
+                quick_chunks = [
+                    c for c in chunks
+                    if c.get("energy_type") == "quick_relief"
+                    or (c.get("duration_minutes") is not None and int(c.get("duration_minutes", 99)) < 10)
+                ]
+                deep_chunks = [
+                    c for c in chunks
+                    if c.get("energy_type") == "deeper_practice"
+                    or (c.get("duration_minutes") is not None and int(c.get("duration_minutes", 0)) >= 10)
+                ]
+                # Chunks with no energy_type and no duration stay in the main file only
+
+                if quick_chunks:
+                    df_quick = pd.DataFrame(quick_chunks)
+                    quick_path = os.path.join(out_dir, "extracted_activities_quick.xlsx")
+                    df_quick.to_excel(quick_path, index=False)
+                    outputs["extracted_activities_quick"] = quick_path
+                    logger.info(
+                        "[MULTI] Saved %d quick activity chunks → %s", len(quick_chunks), quick_path
+                    )
+
+                if deep_chunks:
+                    df_deep = pd.DataFrame(deep_chunks)
+                    deep_path = os.path.join(out_dir, "extracted_activities_deep.xlsx")
+                    df_deep.to_excel(deep_path, index=False)
+                    outputs["extracted_activities_deep"] = deep_path
+                    logger.info(
+                        "[MULTI] Saved %d deep activity chunks → %s", len(deep_chunks), deep_path
+                    )
         else:
-            logger.info("[MULTI] No %s chunks extracted (skipped or empty).")
+            logger.info("[MULTI] No %s chunks extracted (skipped or empty).", chunk_type)
+
     # ------------------------------------------------------------------
     # Step 8 — Typed collection ingest  (NEW)
+    # Activities are automatically routed to souli_activities_quick /
+    # souli_activities_deep inside ingest_all_extractor_outputs.
     # ------------------------------------------------------------------
     ingest_summary: Dict[str, int] = {"general": n_general}
 
@@ -382,7 +405,6 @@ def run_multi_ingestion_pipeline(
             port=r.qdrant_port,
         )
         ingest_summary.update(typed_counts)
-
         logger.info("[MULTI] Typed ingest done: %s", typed_counts)
     else:
         logger.info("[MULTI] Step 8/8 — Typed ingest skipped (skip_ingest=True).")
@@ -393,10 +415,9 @@ def run_multi_ingestion_pipeline(
         json.dump(ingest_summary, f, indent=2)
     outputs["ingest_summary"] = summary_path
 
-    # Final log
     total_ingested = sum(ingest_summary.values())
     logger.info(
-        "[MULTI] Pipeline complete. Collections populated: %s | Total chunks: %d",
+        "[MULTI] Pipeline complete. Collections: %s | Total chunks: %d",
         ingest_summary, total_ingested,
     )
 

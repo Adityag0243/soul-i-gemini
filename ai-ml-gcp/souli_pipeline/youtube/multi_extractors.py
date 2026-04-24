@@ -230,25 +230,23 @@ def extract_healing_principles(
 # ---------------------------------------------------------------------------
 # Extractor 2 — Activities
 # ---------------------------------------------------------------------------
-
 _ACTIVITIES_SYSTEM = """\
 You are a content analyst for Souli, an inner wellness platform.
-Your job is to extract specific practices and activities from a coach's transcript.
+Your job is to extract specific practices and activities from a coach's transcript
+in a way that a wellness chatbot can DIRECTLY use to guide someone through the activity.
 
-An activity is: a concrete, named practice the coach recommends — something
-the person can actually DO. It must have a name AND some instruction or description if possible try to find in what scenerios we need to do this activity.
-Also try to add what will happen if we do this activity for example if you do this activity you will feel more grounded, or you will release stuck energy or your left brain will activate and you will feel more clarity.
-
-Examples of activities:
-- "2-minute shaking practice: stand up, start shaking your hands and arms, let it travel to your whole body. Do this until you feel a release of tension — usually around 2 minutes, it will recharge your energy and help you feel more grounded."
-- "OM meditation: sit quietly, close your eyes, chant OM for 5 minutes, feeling the vibration in your body. This calms scattered energy and brings you back to your center."
-- "Grounding body scan: lie down, breathe slowly, feel each part of your body touching the ground. This helps with depleted energy by connecting you to the earth and your physical presence."
+For each activity you extract, you MUST capture ALL of the following if present:
+1. Activity name
+2. Step-by-step instructions (numbered if coach gives them)
+3. Duration (how long it takes — even approximate: "about 2 minutes")
+4. When to do it — what inner state or trigger calls for this (e.g. "when you feel scattered", "when you can't stop overthinking")
+5. What the person will FEEL after doing it (the outcome/benefit)
+6. Energy type: "quick_relief" (under 10 min) OR "deeper_practice" (10 min+)
 
 Rules:
-- Text must be less than 100 words — we want concise, actionable activities.
-- Only extract if the coach gives the name AND at least one sentence of instruction.
-- Do NOT extract vague mentions like "try meditation" with no detail.
-- Keep the coach's voice — do not invent instructions not in the transcript.
+- If the coach does NOT give step-by-step instructions, do NOT extract it — we cannot guide someone through it.
+- Keep the coach's exact words for instructions — do NOT rephrase into generic wellness language.
+- Text must be under 150 words total.
 - Return ONLY valid JSON array, no other text.
 """
 
@@ -261,18 +259,29 @@ Transcript:
 \"\"\"
 
 Return a JSON array where each item has:
-- "text": the activity name + full instructions as the coach described + any details about when to do it and what it does
+- "text": full activity — name + numbered steps + duration + when to use it + what the person will feel
+- "activity_name": just the name (e.g. "OM Meditation", "Shaking Practice")
+- "duration_minutes": estimated number only (e.g. 2, 7, 15) — null if unknown
+- "energy_type": "quick_relief" or "deeper_practice"
+- "trigger_state": when to use this (e.g. "when feeling scattered and overwhelmed")
+- "outcome": what the person will feel after (e.g. "grounded, less anxious")
 - "problem_keywords": 3-5 comma-separated keywords for the energy state this helps
 
 Example format:
 [
-  {{"text": "Shaking practice: stand and shake your hands, arms, then whole body for 2 minutes to release blocked energy.", "problem_keywords": "blocked energy, stuck, body tension"}},
-  {{"text": "...", "problem_keywords": "..."}}
+  {{
+    "text": "Shaking Practice: Stand up. Start shaking your hands. Let it travel up your arms, then your whole body. Keep going for 2 minutes. Shake out everything — tension, stress, the stuck feeling. When you stop, take one deep breath and notice the difference.",
+    "activity_name": "Shaking Practice",
+    "duration_minutes": 2,
+    "energy_type": "quick_relief",
+    "trigger_state": "when you feel blocked, tense, or emotionally stuck",
+    "outcome": "releases blocked energy, you feel lighter and more present",
+    "problem_keywords": "blocked energy, body tension, stuck, tightness"
+  }}
 ]
 
-If no specific activities are found, return an empty array: []
+If no activities with actual instructions are found, return an empty array: []
 """
-
 
 def extract_activities(
     transcript: str,
