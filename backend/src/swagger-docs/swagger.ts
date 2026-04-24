@@ -68,6 +68,11 @@ export function generateOpenAPIDocument() {
                 description:
                     'Subscription management with Stripe and Razorpay integration, payment verification, and history.',
             },
+            {
+                name: 'Admin Dashboard',
+                description:
+                    'Admin analytics overview for user activity, chatbot metrics, and funnel insights.',
+            },
         ],
         // Default: use API key so "Authorize" is visible and x-api-key is sent with requests
         security: [{ apiKey: [] }],

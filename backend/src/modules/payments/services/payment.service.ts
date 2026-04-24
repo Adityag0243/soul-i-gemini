@@ -30,12 +30,15 @@ import {
     CreatePaymentResponseDto,
     CouponRedemptionResponseDto,
     SubscriptionStatusResponseDto,
+    UpgradePreviewResponseDto,
 } from '../dto/payment.dto';
 import {
     InitiateCheckoutInput,
     VerifyPaymentInput,
     CancelSubscriptionInput,
     RedeemCouponInput,
+    UpgradeSubscriptionInput,
+    PreviewUpgradeInput,
 } from '../schemas/payment.schema';
 import { paymentConfig } from '../../../config';
 
@@ -44,6 +47,64 @@ import { paymentConfig } from '../../../config';
  */
 class SubscriptionService {
     private readonly trialCouponPlanName = 'Launch Free Access Coupon Plan';
+    private readonly inrPerUsd = paymentConfig.usdToInrExchangeRate;
+
+    private usdToInrPaise(usdAmount: number): number {
+        return Math.round(usdAmount * this.inrPerUsd * 100);
+    }
+
+    private getRazorpayProrationBreakdown(input: {
+        oldPriceUsd: number;
+        newPriceUsd: number;
+        periodStart: Date;
+        periodEnd: Date;
+        now?: Date;
+    }) {
+        const now = input.now || new Date();
+        const totalMs = Math.max(
+            1,
+            input.periodEnd.getTime() - input.periodStart.getTime(),
+        );
+        const remainingMs = Math.max(0, input.periodEnd.getTime() - now.getTime());
+        const ratioRemaining = remainingMs / totalMs;
+
+        const oldPlanCreditInrPaise = Math.round(
+            this.usdToInrPaise(input.oldPriceUsd) * ratioRemaining,
+        );
+        const newPlanCostInrPaise = Math.round(
+            this.usdToInrPaise(input.newPriceUsd) * ratioRemaining,
+        );
+        const finalChargeInrPaise = Math.max(
+            0,
+            newPlanCostInrPaise - oldPlanCreditInrPaise,
+        );
+
+        return {
+            ratioRemaining,
+            oldPlanCreditInrPaise,
+            newPlanCostInrPaise,
+            finalChargeInrPaise,
+        };
+    }
+
+    private getPlanExpiryDate(planName: string, fromDate: Date = new Date()): Date {
+        const expiryDate = new Date(fromDate);
+
+        if (planName.toLowerCase().includes('month')) {
+            expiryDate.setMonth(expiryDate.getMonth() + 1);
+        } else if (planName.toLowerCase().includes('6')) {
+            expiryDate.setMonth(expiryDate.getMonth() + 6);
+        } else if (
+            planName.toLowerCase().includes('year') ||
+            planName.toLowerCase().includes('annual')
+        ) {
+            expiryDate.setFullYear(expiryDate.getFullYear() + 1);
+        } else {
+            expiryDate.setDate(expiryDate.getDate() + 30);
+        }
+
+        return expiryDate;
+    }
 
     /**
      * Get all available subscription plans
@@ -191,7 +252,7 @@ class SubscriptionService {
             }
 
             // Create order
-            const amountPaise = Math.round(Number(plan.priceUsd) * 100 * 75); // Convert USD to INR (1 USD = ~75 INR) in paise
+            const amountPaise = this.usdToInrPaise(Number(plan.priceUsd));
 
             const order = await razorpayGateway.createOrder({
                 amount: amountPaise,
@@ -251,6 +312,302 @@ class SubscriptionService {
             });
             throw new InternalError('Payment verification failed');
         }
+    }
+
+    /**
+     * Preview subscription upgrade proration details
+     */
+    async previewUpgrade(
+        userId: number,
+        input: PreviewUpgradeInput,
+    ): Promise<UpgradePreviewResponseDto> {
+        const subscription = await subscriptionRepository.getSubscriptionById(
+            input.subscriptionId,
+        );
+
+        if (subscription.userId !== userId) {
+            throw new BadRequestError('Unauthorized');
+        }
+
+        if (subscription.status !== 'ACTIVE' && subscription.status !== 'FREE') {
+            throw new BadRequestError('Only active subscriptions can be upgraded');
+        }
+
+        const newPlan = await subscriptionRepository.getPlanById(input.newPlanId);
+        if (!newPlan.isActive) {
+            throw new BadRequestError('Selected plan is not active');
+        }
+
+        const oldPrice = Number(subscription.plan.priceUsd);
+        const newPrice = Number(newPlan.priceUsd);
+
+        if (subscription.planId === newPlan.id) {
+            throw new BadRequestError('You are already on this plan');
+        }
+
+        if (newPrice <= oldPrice) {
+            throw new BadRequestError(
+                'This endpoint only supports upgrade to a higher-priced plan',
+            );
+        }
+
+        if (subscription.provider === 'STRIPE') {
+            return {
+                provider: 'stripe',
+                currentPlanId: subscription.planId,
+                currentPlanName: subscription.plan.name,
+                newPlanId: newPlan.id,
+                newPlanName: newPlan.name,
+                currentPeriodEnd: subscription.currentPeriodEnd || undefined,
+                proration: {
+                    ratioRemaining: 0,
+                    note: 'Stripe will automatically compute proration at invoice time.',
+                },
+            };
+        }
+
+        const periodEnd = subscription.currentPeriodEnd;
+        if (!periodEnd) {
+            throw new BadRequestError('Current subscription period is missing');
+        }
+
+        const periodStart = subscription.createdAt;
+        const breakdown = this.getRazorpayProrationBreakdown({
+            oldPriceUsd: oldPrice,
+            newPriceUsd: newPrice,
+            periodStart,
+            periodEnd,
+        });
+
+        return {
+            provider: 'razorpay',
+            currentPlanId: subscription.planId,
+            currentPlanName: subscription.plan.name,
+            newPlanId: newPlan.id,
+            newPlanName: newPlan.name,
+            currentPeriodEnd: subscription.currentPeriodEnd || undefined,
+            proration: {
+                ratioRemaining: breakdown.ratioRemaining,
+                oldPlanCreditInrPaise: breakdown.oldPlanCreditInrPaise,
+                newPlanCostInrPaise: breakdown.newPlanCostInrPaise,
+                finalChargeInrPaise: breakdown.finalChargeInrPaise,
+                note: 'Razorpay proration is computed manually by Souli.',
+            },
+        };
+    }
+
+    /**
+     * Execute subscription upgrade
+     */
+    async upgradeSubscription(userId: number, input: UpgradeSubscriptionInput) {
+        const subscription = await subscriptionRepository.getSubscriptionById(
+            input.subscriptionId,
+        );
+
+        if (subscription.userId !== userId) {
+            throw new BadRequestError('Unauthorized');
+        }
+
+        if (subscription.status !== 'ACTIVE' && subscription.status !== 'FREE') {
+            throw new BadRequestError('Only active subscriptions can be upgraded');
+        }
+
+        const newPlan = await subscriptionRepository.getPlanById(input.newPlanId);
+        if (!newPlan.isActive) {
+            throw new BadRequestError('Selected plan is not active');
+        }
+
+        const oldPrice = Number(subscription.plan.priceUsd);
+        const newPrice = Number(newPlan.priceUsd);
+
+        if (subscription.planId === newPlan.id) {
+            throw new BadRequestError('You are already on this plan');
+        }
+
+        if (newPrice <= oldPrice) {
+            throw new BadRequestError(
+                'This endpoint only supports upgrade to a higher-priced plan',
+            );
+        }
+
+        if (subscription.provider === 'STRIPE') {
+            if (!subscription.providerSubscriptionId) {
+                throw new BadRequestError('Stripe subscription ID missing');
+            }
+
+            if (!newPlan.stripePriceId) {
+                throw new BadRequestError(
+                    'Stripe price is not configured for selected plan',
+                );
+            }
+
+            const stripeSubscription = await stripeGateway
+                .getClient()
+                .subscriptions.retrieve(subscription.providerSubscriptionId);
+            const stripeItem = stripeSubscription.items.data[0];
+
+            if (!stripeItem) {
+                throw new InternalError('Stripe subscription item not found');
+            }
+
+            const updatedSubscription = await stripeGateway
+                .getClient()
+                .subscriptions.update(subscription.providerSubscriptionId, {
+                    items: [
+                        {
+                            id: stripeItem.id,
+                            price: newPlan.stripePriceId,
+                        },
+                    ],
+                    proration_behavior: 'always_invoice',
+                });
+
+            await prisma.userSubscription.update({
+                where: { id: subscription.id },
+                data: {
+                    planId: newPlan.id,
+                    currentPeriodEnd: new Date(
+                        (updatedSubscription.current_period_end || 0) * 1000,
+                    ),
+                    status: 'ACTIVE',
+                },
+            });
+
+            logger.info('Stripe subscription upgraded with proration', {
+                userId,
+                subscriptionId: subscription.id,
+                oldPlanId: subscription.planId,
+                newPlanId: newPlan.id,
+                idempotencyKey: input.idempotencyKey,
+            });
+
+            return {
+                provider: 'stripe',
+                mode: 'immediate',
+                message: 'Plan upgraded. Stripe invoiced proration automatically.',
+                subscriptionId: subscription.id,
+                oldPlanId: subscription.planId,
+                newPlanId: newPlan.id,
+                nextBillingDate: new Date(
+                    (updatedSubscription.current_period_end || 0) * 1000,
+                ),
+            };
+        }
+
+        if (subscription.provider !== 'RAZORPAY') {
+            throw new BadRequestError('Unsupported subscription provider');
+        }
+
+        if (!newPlan.razorpayPlanId) {
+            throw new BadRequestError(
+                'Razorpay plan is not configured for selected plan',
+            );
+        }
+
+        if (!subscription.currentPeriodEnd) {
+            throw new BadRequestError('Current subscription period is missing');
+        }
+
+        const breakdown = this.getRazorpayProrationBreakdown({
+            oldPriceUsd: oldPrice,
+            newPriceUsd: newPrice,
+            periodStart: subscription.createdAt,
+            periodEnd: subscription.currentPeriodEnd,
+        });
+
+        const user = await prisma.user.findUnique({ where: { id: userId } });
+        if (!user?.email) {
+            throw new BadRequestError('User not found or email not set');
+        }
+
+        // Near the end of cycle the charge can be zero after credit.
+        if (breakdown.finalChargeInrPaise <= 0) {
+            await prisma.$transaction(async (tx) => {
+                await tx.userSubscription.update({
+                    where: { id: subscription.id },
+                    data: { status: 'CANCELED' },
+                });
+
+                await tx.userSubscription.create({
+                    data: {
+                        userId,
+                        planId: newPlan.id,
+                        provider: 'RAZORPAY',
+                        status: 'ACTIVE',
+                        currentPeriodEnd: this.getPlanExpiryDate(newPlan.name),
+                    },
+                });
+            });
+
+            logger.info('Razorpay upgrade applied with zero prorated charge', {
+                userId,
+                subscriptionId: subscription.id,
+                oldPlanId: subscription.planId,
+                newPlanId: newPlan.id,
+                idempotencyKey: input.idempotencyKey,
+            });
+
+            return {
+                provider: 'razorpay',
+                mode: 'immediate',
+                message: 'Plan upgraded with zero prorated charge.',
+                subscriptionId: subscription.id,
+                oldPlanId: subscription.planId,
+                newPlanId: newPlan.id,
+                proration: breakdown,
+            };
+        }
+
+        const order = await razorpayGateway.createOrder({
+            amount: breakdown.finalChargeInrPaise,
+            currency: 'INR',
+            receipt: `souli_upgrade_${subscription.id}_${Date.now()}`,
+            description: `Prorated upgrade ${subscription.plan.name} -> ${newPlan.name}`,
+            notes: {
+                action: 'subscription_upgrade',
+                userId: userId.toString(),
+                planId: newPlan.id,
+                upgradeFromSubscriptionId: subscription.id,
+                idempotencyKey: input.idempotencyKey || '',
+                prorationAmountPaise: breakdown.finalChargeInrPaise.toString(),
+                userEmail: user.email,
+            },
+        });
+
+        logger.info('Razorpay prorated upgrade order created', {
+            userId,
+            orderId: order.orderId,
+            fromSubscriptionId: subscription.id,
+            oldPlanId: subscription.planId,
+            newPlanId: newPlan.id,
+            prorationAmountPaise: breakdown.finalChargeInrPaise,
+            idempotencyKey: input.idempotencyKey,
+        });
+
+        return {
+            provider: 'razorpay',
+            mode: 'requires_payment_verification',
+            message:
+                'Complete Razorpay payment and call /payments/verify to finalize upgrade.',
+            order: {
+                orderId: order.orderId,
+                amount: order.amount,
+                currency: order.currency,
+            },
+            oldPlanId: subscription.planId,
+            newPlanId: newPlan.id,
+            proration: breakdown,
+            verifyApi: {
+                method: 'POST',
+                path: '/payments/verify',
+                body: {
+                    provider: 'razorpay',
+                    orderId: order.orderId,
+                    paymentId: '<payment_id_from_client>',
+                    signature: '<signature_from_client>',
+                },
+            },
+        };
     }
 
     /**
@@ -502,6 +859,25 @@ class SubscriptionService {
         input: VerifyPaymentInput,
     ): Promise<CreatePaymentResponseDto> {
         try {
+            const existingPayment =
+                await paymentRepository.getPaymentByProviderPaymentId(
+                    'RAZORPAY',
+                    input.paymentId,
+                );
+
+            if (existingPayment) {
+                return {
+                    success: true,
+                    message: 'Payment already verified',
+                    data: {
+                        paymentId: existingPayment.id,
+                        amount: Number(existingPayment.amount),
+                        status: existingPayment.status,
+                        provider: 'razorpay',
+                    },
+                };
+            }
+
             // Verify signature
             const isSignatureValid = razorpayGateway.verifyPaymentSignature(
                 input.orderId,
@@ -538,34 +914,49 @@ class SubscriptionService {
 
             const plan = await subscriptionRepository.getPlanById(planId);
 
+            const upgradeFromSubscriptionId =
+                order.notes?.upgradeFromSubscriptionId !== undefined
+                    ? String(order.notes.upgradeFromSubscriptionId)
+                    : undefined;
+
+            if (upgradeFromSubscriptionId) {
+                const oldSubscription =
+                    await subscriptionRepository.getSubscriptionById(
+                        upgradeFromSubscriptionId,
+                    );
+
+                if (oldSubscription.userId !== userId) {
+                    throw new BadRequestError('Unauthorized upgrade payment');
+                }
+
+                if (
+                    oldSubscription.status !== 'ACTIVE' &&
+                    oldSubscription.status !== 'FREE'
+                ) {
+                    throw new BadRequestError(
+                        'Original subscription is not active for upgrade',
+                    );
+                }
+
+                await subscriptionRepository.updateSubscriptionStatus(
+                    oldSubscription.id,
+                    'CANCELED',
+                );
+            }
+
             // Create payment record
             const paymentRecord = await paymentRepository.createPayment({
                 userId,
                 provider: 'RAZORPAY',
-                amount: Number(plan.priceUsd),
-                currency: 'USD',
+                amount: Number(payment.amount) / 100,
+                currency: payment.currency,
                 status: 'SUCCESS',
                 providerPaymentId: input.paymentId,
                 rawWebhook: payment,
             });
 
-            // Calculate subscription period (30 days, 6 months, or 1 year based on plan name)
             const currentDate = new Date();
-            let expiryDate = new Date();
-
-            if (plan.name.toLowerCase().includes('month')) {
-                expiryDate.setMonth(expiryDate.getMonth() + 1);
-            } else if (plan.name.toLowerCase().includes('6')) {
-                expiryDate.setMonth(expiryDate.getMonth() + 6);
-            } else if (
-                plan.name.toLowerCase().includes('year') ||
-                plan.name.toLowerCase().includes('annual')
-            ) {
-                expiryDate.setFullYear(expiryDate.getFullYear() + 1);
-            } else {
-                // Default to 30 days
-                expiryDate.setDate(expiryDate.getDate() + 30);
-            }
+            const expiryDate = this.getPlanExpiryDate(plan.name, currentDate);
 
             // Create subscription record
             const userSubscription =
@@ -632,7 +1023,7 @@ class SubscriptionService {
                 message: 'Payment verified and subscription activated',
                 data: {
                     paymentId: paymentRecord.id,
-                    amount: Number(plan.priceUsd),
+                    amount: Number(payment.amount) / 100,
                     status: 'SUCCESS',
                     provider: 'razorpay',
                 },

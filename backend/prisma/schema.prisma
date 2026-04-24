@@ -108,9 +108,26 @@ model User {
   referralsGiven    Referral[]         @relation("ReferrerRelation")
   referralsReceived Referral[]         @relation("ReferredRelation")
   analyticsEvents   AnalyticsEvent[]
+  notificationPreference UserNotificationPreference?
 
   @@index([email])
   @@map("users")
+}
+
+model UserNotificationPreference {
+  id                 String  @id @default(uuid()) @db.Uuid
+  userId             Int     @unique @map("user_id")
+  dailyCheckInEnabled Boolean @default(true) @map("daily_check_in_enabled")
+  remindersEnabled   Boolean @default(true) @map("reminders_enabled")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([dailyCheckInEnabled])
+  @@index([remindersEnabled])
+  @@map("user_notification_preferences")
 }
 
 model UserRoleRelation {
