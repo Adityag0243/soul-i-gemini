@@ -28,6 +28,8 @@ import logging
 import re
 from typing import Dict, List, Optional
 
+from torch import chunk
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -67,77 +69,99 @@ def _run_extractor_prompt(
 
     return llm.generate(prompt=user_prompt, system=system_prompt)
 
-
 def _parse_extractor_output(
     raw: str,
     chunk_type: str,
     energy_node: str,
 ) -> List[Dict]:
-    """
-    Parse LLM JSON output into a list of standard chunk dicts.
-
-    LLM is asked to return a JSON array like:
-    [
-        {"text": "...", "problem_keywords": "guilt, avoidance"},
-        {"text": "...", "problem_keywords": "stuck, fear"}
-    ]
-
-    Falls back to treating the whole raw output as one chunk if JSON fails.
-    """
     raw = raw.strip()
     # Strip markdown fences
     raw = re.sub(r"```(?:json)?", "", raw).strip().rstrip("`").strip()
 
-    chunks = []
-
-    # Try parsing as JSON array
-    try:
-        data = json.loads(raw)
-        if isinstance(data, list):
-            for item in data:
-                text = str(item.get("text", "")).strip()
-                keywords = str(item.get("problem_keywords", "")).strip()
-                if text and len(text.split()) >= 5:  # ignore trivially short extracts
-                    chunks.append({
-                        "text":             text,
-                        "chunk_type":       chunk_type,
-                        "energy_node":      energy_node,
-                        "problem_keywords": keywords,
-                        "source_video":     "",   # filled by orchestrator
-                        "youtube_url":      "",   # filled by orchestrator
-                    })
-            return chunks
-        elif isinstance(data, dict):
-            # Sometimes LLM wraps in {"items": [...]} — handle it
-            items = data.get("items", data.get("chunks", data.get("results", [])))
-            if isinstance(items, list):
-                return _parse_extractor_output(json.dumps(items), chunk_type, energy_node)
-    except json.JSONDecodeError:
-        # Try to find JSON array inside noisy text
-        start = raw.find("[")
-        end = raw.rfind("]") + 1
-        if start != -1 and end > start:
-            try:
-                return _parse_extractor_output(raw[start:end], chunk_type, energy_node)
-            except Exception:
-                pass
-
-    # Last resort — treat entire output as one chunk
-    if raw and len(raw.split()) >= 10:
-        logger.warning(
-            "[EXTRACTOR:%s] JSON parse failed — wrapping entire output as single chunk.", chunk_type
-        )
-        chunks.append({
-            "text":             raw[:2000],  # cap at 2000 chars
+    def _build_chunk(item: dict) -> dict:
+        text = str(item.get("text", "")).strip()
+        if not text or len(text.split()) < 5:
+            return {}
+        chunk = {
+            "text":             text,
             "chunk_type":       chunk_type,
             "energy_node":      energy_node,
-            "problem_keywords": "",
+            "problem_keywords": str(item.get("problem_keywords", "")).strip(),
             "source_video":     "",
             "youtube_url":      "",
-        })
+        }
+        if chunk_type == "activities":
+            chunk["activity_name"]    = str(item.get("activity_name", "")).strip()
+            chunk["duration_minutes"] = item.get("duration_minutes")
+            chunk["energy_type"]      = str(item.get("energy_type", "")).strip()
+            chunk["trigger_state"]    = str(item.get("trigger_state", "")).strip()
+            chunk["outcome"]          = str(item.get("outcome", "")).strip()
+        return chunk
 
-    return chunks
+    def _parse_json_str(s: str) -> List[Dict]:
+        data = json.loads(s)
+        chunks = []
+        # Case 1: array of objects  [{"text": ...}, ...]
+        if isinstance(data, list):
+            for item in data:
+                if isinstance(item, dict):
+                    c = _build_chunk(item)
+                    if c:
+                        chunks.append(c)
+                elif isinstance(item, str):
+                    # array of strings — wrap each as text
+                    c = _build_chunk({"text": item})
+                    if c:
+                        chunks.append(c)
+        # Case 2: single object {"text": ...}
+        elif isinstance(data, dict):
+            # maybe wrapped: {"items": [...]} or {"activities": [...]}
+            for key in ("items", "chunks", "results", "activities", "practices"):
+                if key in data and isinstance(data[key], list):
+                    return _parse_json_str(json.dumps(data[key]))
+            # plain single object
+            c = _build_chunk(data)
+            if c:
+                chunks.append(c)
+        return chunks
 
+    # Try direct parse
+    try:
+        return _parse_json_str(raw)
+    except json.JSONDecodeError:
+        pass
+
+    # Try finding JSON array inside noisy text
+    start = raw.find("[")
+    end   = raw.rfind("]") + 1
+    if start != -1 and end > start:
+        try:
+            return _parse_json_str(raw[start:end])
+        except Exception:
+            pass
+
+    # Try finding JSON object inside noisy text
+    start = raw.find("{")
+    end   = raw.rfind("}") + 1
+    if start != -1 and end > start:
+        try:
+            return _parse_json_str(raw[start:end])
+        except Exception:
+            pass
+
+    # Last resort — only if it looks like actual activity content, not LLM refusal
+    refusal_phrases = ["unable to find", "no specific", "no activities", "cannot find", "i could not"]
+    if any(p in raw.lower() for p in refusal_phrases):
+        logger.info("[EXTRACTOR:%s] LLM found no activities — returning empty.", chunk_type)
+        return []
+
+    if raw and len(raw.split()) >= 10:
+        logger.warning("[EXTRACTOR:%s] JSON parse failed — wrapping entire output as single chunk.", chunk_type)
+        c = _build_chunk({"text": raw[:2000]})
+        if c:
+            return [c]
+
+    return []
 
 # ---------------------------------------------------------------------------
 # Extractor 1 — Healing Principles
@@ -217,7 +241,7 @@ def extract_healing_principles(
 ) -> List[Dict]:
     """Extract healing principles — truths the coach says resolve this energy pattern."""
     try:
-        user_prompt = _HEALING_USER.format(transcript=transcript[:8000])
+        user_prompt = _HEALING_USER.format(transcript=transcript[:11000])
         raw = _run_extractor_prompt(transcript, _HEALING_SYSTEM, user_prompt, ollama_model, ollama_endpoint)
         chunks = _parse_extractor_output(raw, "healing", energy_node)
         logger.info("[EXTRACTOR:healing] Extracted %d chunks.", len(chunks))
@@ -309,15 +333,15 @@ def extract_activities(
 ) -> List[Dict]:
     """Extract specific practices and activities the coach recommends."""
     try:
-        user_prompt = _ACTIVITIES_USER.format(transcript=transcript[:8000])
+        user_prompt = _ACTIVITIES_USER.format(transcript=transcript[:12000])
         raw = _run_extractor_prompt(transcript, _ACTIVITIES_SYSTEM, user_prompt, ollama_model, ollama_endpoint)
+        logger.info("[EXTRACTOR:activities] RAW OUTPUT FIRST 500 CHARS: %s", raw[:500])
         chunks = _parse_extractor_output(raw, "activities", energy_node)
         logger.info("[EXTRACTOR:activities] Extracted %d chunks.", len(chunks))
         return chunks
     except Exception as exc:
         logger.warning("[EXTRACTOR:activities] Failed: %s", exc)
         return []
-
 
 # ---------------------------------------------------------------------------
 # Extractor 3 — Stories and Phrases
