@@ -79,7 +79,7 @@ _PHASE_COLLECTION_MAP: Dict[str, List[str]] = {
 
 # ---------------------------------------------------------------------------
 # Qdrant client + collection helpers
-# (mirrors pattern in qdrant_store_improved.py — no shared state)
+# (mirrors pattern in qdrant_store_improved.py — no shared state....)
 # ---------------------------------------------------------------------------
 
 def _get_qdrant_client(host: str = None, port: int = None):
@@ -87,21 +87,21 @@ def _get_qdrant_client(host: str = None, port: int = None):
     from qdrant_client import QdrantClient
 
     api_key = os.getenv("QDRANT_API_KEY")
-    qdrant_host = host or os.getenv("QDRANT_HOST", "localhost")
+    qdrant_host = host or os.getenv("QDRANT_HOST") or "localhost"
     qdrant_port = port or int(os.getenv("QDRANT_PORT", 6333))
 
     try:
         if api_key:
             # Qdrant Cloud — connects to remote server with API key
             client = QdrantClient(
-                host=qdrant_host,
-                port=qdrant_port,
+                url=f"https://{qdrant_host}",
                 api_key=api_key,
-                https=True,
-                timeout=10,
+                timeout=30,
             )
         else:
             # Local Qdrant (fallback for local dev)
+            logger.info("Connecting to local Qdrant at %s:%d", qdrant_host, qdrant_port)    
+            qdrant_port = port or int(os.getenv("QDRANT_PORT", 6333))
             client = QdrantClient(host=qdrant_host, port=qdrant_port, timeout=10)
 
         client.get_collections()  # test connection
@@ -160,7 +160,7 @@ def ingest_typed_chunks(
     chunks: List[Dict],
     chunk_type: str,
     embedding_model: str = _DEFAULT_MODEL,
-    host: str = "localhost",
+    host: str = None,
     port: int = 6333,
     batch_size: int = 32,
 ) -> int:
@@ -247,7 +247,7 @@ def ingest_typed_chunks(
 def ingest_all_extractor_outputs(
     extractor_outputs: Dict[str, List[Dict]],
     embedding_model: str = _DEFAULT_MODEL,
-    host: str = "localhost",
+    host: str = None,
     port: int = 6333,
 ) -> Dict[str, int]:
     """
@@ -308,7 +308,7 @@ def query_by_phase(
     turn_count: int = 0,
     top_k: int = 2,
     embedding_model: str = _DEFAULT_MODEL,
-    host: str = "localhost",
+    host: str = None,
     port: int = 6333,
     score_threshold: float = 0.25,
 ) -> List[Dict]:
@@ -351,6 +351,37 @@ def query_by_phase(
         if collection not in existing:
             logger.debug("[MULTI:retrieval] Collection '%s' not found — skipping.", collection)
             continue
+
+        # Activities: fetch by energy_node filter only (not text similarity)
+        # because activity text never matches user query semantically
+        if collection == "souli_activities":
+            try:
+                act_filter = None
+                if energy_node:
+                    from qdrant_client.models import Filter, FieldCondition, MatchValue
+                    act_filter = Filter(
+                        must=[FieldCondition(key=F_NODE, match=MatchValue(value=energy_node))]
+                    )
+                act_hits = client.scroll(
+                    collection_name=collection,
+                    scroll_filter=act_filter,
+                    limit=top_k,
+                    with_payload=True,
+                )[0]
+                for r in act_hits:
+                    p = r.payload or {}
+                    results.append({
+                        "text":         p.get(F_TEXT, ""),
+                        "chunk_type":   "activities",
+                        "energy_node":  p.get(F_NODE, ""),
+                        "source_video": p.get(F_SOURCE, ""),
+                        "score":        1.0,
+                    })
+                logger.debug("[MULTI] Activities by node: %d chunks", len(act_hits))
+            except Exception as exc:
+                logger.debug("[MULTI] Activities scroll failed: %s", exc)
+            continue
+
 
         query_filter = None
         if energy_node:
@@ -403,7 +434,7 @@ def query_by_phase(
 # Utility — list all multi collections and their point counts
 # ---------------------------------------------------------------------------
 
-def get_collection_stats(host: str = "localhost", port: int = 6333) -> Dict[str, int]:
+def get_collection_stats(host: str = None, port: int = 6333) -> Dict[str, int]:
     """
     Return point counts for all typed collections.
     Useful for verifying ingestion was successful.

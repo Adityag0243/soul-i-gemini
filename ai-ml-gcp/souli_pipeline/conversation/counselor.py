@@ -359,10 +359,14 @@ def _build_activity_steps_prompt(
     # ── Activity detail source: Qdrant first, Excel fallback ──────────
     if activity_chunks:
         # Qdrant mein real step-by-step instructions hain
-        activity_detail = "\n\n".join(
-            c["text"] for c in activity_chunks[:2] if c.get("text")
+        best = activity_chunks[0]
+        activity_detail = (
+            f"Activity: {best.get('activity_name', 'Practice')}\n"
+            f"When to use: {best.get('trigger_state', '')}\n"
+            f"Duration: {best.get('duration_minutes', '?')} minutes\n"
+            f"Instructions: {best.get('text', '')}\n"
+            f"Person will feel: {best.get('outcome', '')}"
         )
-        activity_name = activity_chunks[0]["text"].split(":")[0].strip()
     else:
         # Qdrant empty hai (abhi tak koi video ingest nahi hua) — Excel fallback
         activity_name = practices.split(",")[0].strip() if practices else "a grounding practice"
