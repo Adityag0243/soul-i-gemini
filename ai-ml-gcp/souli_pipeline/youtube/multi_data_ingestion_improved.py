@@ -177,6 +177,8 @@ def run_multi_ingestion_pipeline(
         ollama_model=c.chat_model,
         ollama_endpoint=c.ollama_endpoint,
         num_ctx=num_ctx_processing,
+        temperature=0.3,
+        max_workers=4,  
     )
 
     df_cleaned = pd.DataFrame(cleaned_chunks)
