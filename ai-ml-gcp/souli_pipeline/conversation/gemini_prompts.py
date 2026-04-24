@@ -107,7 +107,7 @@ Phase: commitment_check
           depleted_energy:    "When we're this drained, the well feels empty — but there are ways to begin filling it back, one small step at a time."
           scattered_energy:   "When everything feels fragmented like this, it's usually a signal from inside asking to be gathered — and that's something we can work with."
           outofcontrol_energy:"When things feel this out of grip, it's often the inner state that needs steadying first — and there are practices that actually help with that."
-          grief_energy:       "Grief like this doesn't just live in the mind — it sits in the body too. There are gentle ways to begin moving through it."
+
           normal_energy:      "Sometimes the restlessness is a signal that something inside is ready to grow — and we can channel that."
       - DO NOT copy these examples word for word — adapt them to exactly what the user shared.
       - NEVER make it feel like a pitch or a sales line. It should feel like a caring friend saying "hey, there's actually something that could help."
@@ -133,9 +133,8 @@ blocked_energy      — Stuck, can't move forward, paralyzed, heavy resistance, 
 scattered_energy    — Too many thoughts, can't focus, spinning, overwhelmed by fragments
 depleted_energy     — Exhausted, burnt out, empty, nothing left, running on fumes
 outofcontrol_energy — Anxious, panicking, racing thoughts, spiraling, losing grip
-suppressed_energy   — Holding things in, numb, disconnected from own feelings, can't express
 normal_energy       — Relatively balanced, processing normally, seeking growth or guidance
-grief_energy        — Loss, mourning, deep persistent sadness, missing something or someone
+
 
 node_reasoning: Explain your choice in 12-20 words. Be specific to what they said.
 Example: "User describes spinning thoughts and incomplete tasks — classic fragmented focus pattern."
