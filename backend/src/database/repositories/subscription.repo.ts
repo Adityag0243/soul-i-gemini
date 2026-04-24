@@ -94,10 +94,10 @@ class SubscriptionRepository {
     async createSubscription(data: {
         userId: number;
         planId: string;
-        provider: PaymentProvider;
-        providerSubscriptionId: string;
+        provider?: PaymentProvider;
+        providerSubscriptionId?: string;
         status: SubscriptionStatus;
-        currentPeriodEnd: Date;
+        currentPeriodEnd?: Date;
     }) {
         try {
             const subscription = await prisma.userSubscription.create({

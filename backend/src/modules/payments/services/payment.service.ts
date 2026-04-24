@@ -26,22 +26,25 @@ import {
 import logger from '../../../core/logger';
 import {
     SubscriptionPlanDto,
-    UserSubscriptionDto,
     CheckoutSessionDto,
     CreatePaymentResponseDto,
+    CouponRedemptionResponseDto,
     SubscriptionStatusResponseDto,
 } from '../dto/payment.dto';
 import {
     InitiateCheckoutInput,
     VerifyPaymentInput,
     CancelSubscriptionInput,
-    UpgradeSubscriptionInput,
+    RedeemCouponInput,
 } from '../schemas/payment.schema';
+import { paymentConfig } from '../../../config';
 
 /**
  * Subscription Service - Handles subscription management logic
  */
 class SubscriptionService {
+    private readonly trialCouponPlanName = 'Launch Free Access Coupon Plan';
+
     /**
      * Get all available subscription plans
      */
@@ -248,6 +251,112 @@ class SubscriptionService {
             });
             throw new InternalError('Payment verification failed');
         }
+    }
+
+    /**
+     * Redeem static launch coupon and grant temporary FREE subscription access
+     */
+    async redeemCoupon(
+        userId: number,
+        input: RedeemCouponInput,
+    ): Promise<CouponRedemptionResponseDto> {
+        const submittedCode = input.code.trim().toUpperCase();
+        const expectedCode = paymentConfig.trialCouponCode.trim().toUpperCase();
+
+        if (!paymentConfig.trialCouponEnabled) {
+            throw new BadRequestError(
+                'Coupon redemption is currently disabled',
+            );
+        }
+
+        if (submittedCode !== expectedCode) {
+            throw new BadRequestError('Invalid coupon code');
+        }
+
+        const activeSubscription =
+            await subscriptionRepository.getActiveSubscriptionByUserId(userId);
+
+        if (activeSubscription && activeSubscription.status === 'ACTIVE') {
+            return {
+                success: true,
+                message: 'Paid subscription already active',
+                data: {
+                    code: expectedCode,
+                    subscriptionId: activeSubscription.id,
+                    status: activeSubscription.status,
+                    expiresAt: activeSubscription.currentPeriodEnd || undefined,
+                    alreadyApplied: true,
+                },
+            };
+        }
+
+        if (activeSubscription && activeSubscription.status === 'FREE') {
+            return {
+                success: true,
+                message: 'Coupon already applied',
+                data: {
+                    code: expectedCode,
+                    subscriptionId: activeSubscription.id,
+                    status: activeSubscription.status,
+                    expiresAt: activeSubscription.currentPeriodEnd || undefined,
+                    alreadyApplied: true,
+                },
+            };
+        }
+
+        const plan = await this.getOrCreateTrialCouponPlan();
+        const now = new Date();
+        const expiresAt = new Date(now);
+        expiresAt.setDate(
+            expiresAt.getDate() + paymentConfig.trialCouponValidityDays,
+        );
+
+        const createdSubscription =
+            await subscriptionRepository.createSubscription({
+                userId,
+                planId: plan.id,
+                status: 'FREE',
+                currentPeriodEnd: expiresAt,
+            });
+
+        logger.info('Static coupon redeemed successfully', {
+            userId,
+            code: expectedCode,
+            subscriptionId: createdSubscription.id,
+            validDays: paymentConfig.trialCouponValidityDays,
+        });
+
+        return {
+            success: true,
+            message: 'Coupon applied successfully',
+            data: {
+                code: expectedCode,
+                subscriptionId: createdSubscription.id,
+                status: createdSubscription.status,
+                expiresAt: createdSubscription.currentPeriodEnd || undefined,
+                alreadyApplied: false,
+            },
+        };
+    }
+
+    private async getOrCreateTrialCouponPlan() {
+        const existingPlan = await prisma.subscriptionPlan.findFirst({
+            where: { name: this.trialCouponPlanName },
+        });
+
+        if (existingPlan) {
+            return existingPlan;
+        }
+
+        return prisma.subscriptionPlan.create({
+            data: {
+                name: this.trialCouponPlanName,
+                priceUsd: 0,
+                // Keep this hidden from /payments/plans by marking inactive.
+                isActive: false,
+                chatLimit: null,
+            },
+        });
     }
 
     /**
@@ -569,7 +678,9 @@ class SubscriptionService {
 
             return {
                 status: subscription.status,
-                isActive: subscription.status === 'ACTIVE',
+                isActive:
+                    subscription.status === 'ACTIVE' ||
+                    subscription.status === 'FREE',
                 currentPeriodEnd: subscription.currentPeriodEnd || undefined,
                 remainingDays: Math.max(0, remainingDays),
                 willRenew: remainingDays > 0,

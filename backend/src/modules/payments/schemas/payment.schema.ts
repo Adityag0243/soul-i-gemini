@@ -91,6 +91,15 @@ export const getPaymentHistorySchema = z.object({
 
 export type GetPaymentHistoryInput = z.infer<typeof getPaymentHistorySchema>;
 
+export const redeemCouponSchema = z.object({
+    code: z
+        .string()
+        .min(1, 'Coupon code is required')
+        .max(64, 'Coupon code is too long'),
+});
+
+export type RedeemCouponInput = z.infer<typeof redeemCouponSchema>;
+
 export const stripeWebhookSchema = z.object({
     id: z.string(),
     object: z.literal('event'),

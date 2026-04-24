@@ -130,6 +130,18 @@ export interface CreatePaymentResponseDto {
     };
 }
 
+export interface CouponRedemptionResponseDto {
+    success: boolean;
+    message: string;
+    data: {
+        code: string;
+        subscriptionId: string;
+        status: string;
+        expiresAt?: Date;
+        alreadyApplied: boolean;
+    };
+}
+
 export interface CancelSubscriptionResponseDto {
     success: boolean;
     message: string;

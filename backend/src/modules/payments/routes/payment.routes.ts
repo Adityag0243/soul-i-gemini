@@ -10,6 +10,7 @@ import {
     cancelSubscriptionSchema,
     getSubscriptionHistorySchema,
     getPaymentHistorySchema,
+    redeemCouponSchema,
 } from '../schemas/payment.schema';
 import * as PaymentController from '../controllers/payment.controller';
 
@@ -252,6 +253,39 @@ router.get(
     authMiddleware,
     validator(getPaymentHistorySchema, ValidationSource.QUERY),
     asyncHandler(PaymentController.getPaymentHistory),
+);
+
+// ============ Coupon ============
+
+registry.registerPath({
+    method: 'post',
+    path: '/payments/coupon/redeem',
+    summary: 'Redeem Static Coupon Code',
+    description:
+        'Redeem launch coupon code for temporary free subscription access without payment',
+    tags: ['Payments - Coupon'],
+    security: [{ bearerAuth: [] }],
+    request: {
+        body: {
+            content: {
+                'application/json': {
+                    schema: redeemCouponSchema,
+                },
+            },
+        },
+    },
+    responses: {
+        200: { description: 'Coupon redeemed successfully' },
+        400: { description: 'Invalid coupon or coupon disabled' },
+        401: { description: 'Unauthorized' },
+    },
+});
+
+router.post(
+    '/coupon/redeem',
+    authMiddleware,
+    validator(redeemCouponSchema, ValidationSource.BODY),
+    asyncHandler(PaymentController.redeemCoupon),
 );
 
 // ============ Webhooks ============
