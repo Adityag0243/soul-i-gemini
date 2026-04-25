@@ -15,19 +15,18 @@
 # Before first run — authenticate Gemini on the host machine (once):
 #   gcloud auth application-default login
 #   gcloud auth application-default set-quota-project YOUR_GCP_PROJECT_ID
-#
-# DATA PERSISTENCE:
-#   ./data/      → Excel, videos.csv (lives on EBS, survives stop-start)
-#   ./outputs/   → Pipeline outputs  (lives on EBS, survives stop-start)
-#   ollama-models → Docker named volume on NVMe (re-pulled by ollama-init if lost)
 # ─────────────────────────────────────────────────────────────────────────────
+
+version: "3.9"
 
 networks:
   souli-net:
     driver: bridge
 
 volumes:
-  ollama-models:    # LLM weights — large, OK on NVMe, ollama-init re-pulls if needed
+  ollama-models:    # Persists pulled LLM models across container restarts
+  souli-outputs:    # Pipeline outputs
+  souli-data:       # Input data (Excel, videos.csv)
 
 # ── Shared environment block ──────────────────────────────────────────────────
 x-souli-env: &souli-env
@@ -64,10 +63,10 @@ x-souli-env: &souli-env
   SOULI_CONFIG_PATH: /app/configs/pipeline.aws.yaml
   TRANSFORMERS_VERBOSITY: error
 
-# ── Shared volumes block (bind mounts → EBS, survives EC2 stop-start) ─────
+# ── Shared volumes block ──────────────────────────────────────────────────────
 x-souli-volumes: &souli-volumes
-  - ./data:/app/data
-  - ./outputs:/app/outputs
+  - souli-data:/app/data
+  - souli-outputs:/app/outputs
   - ${GCLOUD_CONFIG_DIR:-/home/ubuntu/.config/gcloud}:/root/.config/gcloud:ro
 
 services:
@@ -143,7 +142,10 @@ services:
     depends_on:
       ollama:
         condition: service_healthy
-    volumes: *souli-volumes
+    volumes:
+      - souli-data:/app/data
+      - souli-outputs:/app/outputs
+      - ${GCLOUD_CONFIG_DIR:-/home/ubuntu/.config/gcloud}:/root/.config/gcloud:ro
     environment:
       <<: *souli-env
     command: [ "gunicorn", "souli_pipeline.api:app", "--worker-class", "uvicorn.workers.UvicornWorker", "--workers", "3", "--bind", "0.0.0.0:8000", "--timeout", "120" ]
@@ -175,7 +177,10 @@ services:
     depends_on:
       ollama:
         condition: service_healthy
-    volumes: *souli-volumes
+    volumes:
+      - souli-data:/app/data
+      - souli-outputs:/app/outputs
+      - ${GCLOUD_CONFIG_DIR:-/home/ubuntu/.config/gcloud}:/root/.config/gcloud:ro
     environment:
       <<: *souli-env
       SOULI_LOG_LEVEL: DEBUG
@@ -195,7 +200,10 @@ services:
     depends_on:
       ollama:
         condition: service_healthy
-    volumes: *souli-volumes
+    volumes:
+      - souli-data:/app/data
+      - souli-outputs:/app/outputs
+      - ${GCLOUD_CONFIG_DIR:-/home/ubuntu/.config/gcloud}:/root/.config/gcloud:ro
     environment:
       <<: *souli-env
     command: [ "python", "-m", "souli_pipeline.voice.run_worker" ]
@@ -219,7 +227,7 @@ services:
     profiles:
       - livekit-selfhosted
 
-  # ── Ollama Model Puller (runs once per compose-up, pulls if missing) ──────
+  # ── Ollama Model Puller (runs once, pulls required models) ────────────────
   ollama-init:
     image: ollama/ollama:latest
     container_name: souli-ollama-init
@@ -233,19 +241,10 @@ services:
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
-        echo "Checking models..."
-        if ! ollama list | grep -q "llama3.1"; then
-          echo "Pulling llama3.1..."
-          ollama pull llama3.1
-        else
-          echo "llama3.1 already present, skipping."
-        fi
-        if ! ollama list | grep -q "qwen2.5:1.5b"; then
-          echo "Pulling qwen2.5:1.5b..."
-          ollama pull qwen2.5:1.5b
-        else
-          echo "qwen2.5:1.5b already present, skipping."
-        fi
+        echo "Pulling llama3.1..."
+        ollama pull llama3.1
+        echo "Pulling qwen2.5:1.5b..."
+        ollama pull qwen2.5:1.5b
         echo "All models ready!"
     environment:
       - OLLAMA_HOST=ollama:11434
