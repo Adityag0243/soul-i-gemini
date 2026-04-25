@@ -155,7 +155,7 @@ def _content_uuid(text: str, source: str, chunk_type: str) -> str:
 # ---------------------------------------------------------------------------
 # Single-collection typed ingest
 # ---------------------------------------------------------------------------
-
+import os
 def ingest_typed_chunks(
     chunks: List[Dict],
     chunk_type: str,
@@ -203,8 +203,13 @@ def ingest_typed_chunks(
 
     if len(deduped) < len(valid):
         logger.info("[MULTI] Dropped %d duplicate chunks for type '%s'.", len(valid) - len(deduped), chunk_type)
-
-    client = _get_qdrant_client(host, port)
+    
+    
+    url = f'https://{os.getenv("QDRANT_HOST")}'
+    api_key = os.getenv("QDRANT_API_KEY")
+    host = os.getenv("QDRANT_HOST", "localhost")
+    port = int(os.getenv("QDRANT_PORT", 6333))
+    client = _get_qdrant_client(url=url, api_key=api_key, host=host, port=port)
     _ensure_collection(client, collection)
 
     total    = len(deduped)
