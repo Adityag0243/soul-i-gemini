@@ -11,6 +11,8 @@ import {
     getSubscriptionHistorySchema,
     getPaymentHistorySchema,
     redeemCouponSchema,
+    previewUpgradeSchema,
+    upgradeSubscriptionSchema,
 } from '../schemas/payment.schema';
 import * as PaymentController from '../controllers/payment.controller';
 
@@ -208,6 +210,68 @@ router.post(
     authMiddleware,
     validator(cancelSubscriptionSchema, ValidationSource.BODY),
     asyncHandler(PaymentController.cancelSubscription),
+);
+
+registry.registerPath({
+    method: 'post',
+    path: '/payments/subscription/upgrade/preview',
+    summary: 'Preview Subscription Upgrade Proration',
+    description:
+        'Preview provider-specific proration details before upgrading a subscription.',
+    tags: ['Payments - Subscription'],
+    security: [{ bearerAuth: [] }],
+    request: {
+        body: {
+            content: {
+                'application/json': {
+                    schema: previewUpgradeSchema,
+                },
+            },
+        },
+    },
+    responses: {
+        200: { description: 'Upgrade preview generated successfully' },
+        400: { description: 'Invalid upgrade request' },
+        401: { description: 'Unauthorized' },
+    },
+});
+
+router.post(
+    '/subscription/upgrade/preview',
+    authMiddleware,
+    validator(previewUpgradeSchema, ValidationSource.BODY),
+    asyncHandler(PaymentController.previewSubscriptionUpgrade),
+);
+
+registry.registerPath({
+    method: 'post',
+    path: '/payments/subscription/upgrade',
+    summary: 'Upgrade Subscription Plan',
+    description:
+        'Upgrade subscription with Stripe automatic proration or Razorpay manual proration flow.',
+    tags: ['Payments - Subscription'],
+    security: [{ bearerAuth: [] }],
+    request: {
+        body: {
+            content: {
+                'application/json': {
+                    schema: upgradeSubscriptionSchema,
+                },
+            },
+        },
+    },
+    responses: {
+        200: { description: 'Upgrade request accepted' },
+        400: { description: 'Invalid upgrade request' },
+        401: { description: 'Unauthorized' },
+    },
+});
+
+router.post(
+    '/subscription/upgrade',
+    authMiddleware,
+    validator(upgradeSubscriptionSchema, ValidationSource.BODY),
+    asyncHandler(PaymentController.upgradeSubscription),
 );
 
 // ============ Payment History ============

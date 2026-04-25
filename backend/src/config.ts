@@ -102,6 +102,10 @@ export const paymentConfig = {
     // Razorpay
     razorpayKeyId: process.env.RAZORPAY_KEY_ID || '',
     razorpayKeySecret: process.env.RAZORPAY_KEY_SECRET || '',
+    usdToInrExchangeRate: (() => {
+        const raw = parseFloat(process.env.USD_TO_INR_EXCHANGE_RATE || '75');
+        return Number.isFinite(raw) && raw > 0 ? raw : 75;
+    })(),
 
     // Webhook
     stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET || '',
@@ -117,7 +121,7 @@ export const paymentConfig = {
     trialCouponEnabled:
         (process.env.TRIAL_COUPON_ENABLED || 'true').toLowerCase() === 'true',
     trialCouponValidityDays: parseInt(
-        process.env.TRIAL_COUPON_VALIDITY_DAYS || '365',
+        process.env.TRIAL_COUPON_VALIDITY_DAYS || '60',
         10,
     ),
 };

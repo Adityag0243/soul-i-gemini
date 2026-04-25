@@ -55,11 +55,29 @@ export type CancelSubscriptionInput = z.infer<typeof cancelSubscriptionSchema>;
 export const upgradeSubscriptionSchema = z.object({
     subscriptionId: z.string().uuid('Invalid subscription ID'),
     newPlanId: z.string().uuid('Invalid plan ID'),
+    redirectUrl: z
+        .string()
+        .url('Invalid redirect URL')
+        .optional()
+        .describe('Optional redirect URL for Razorpay checkout handoff'),
+    idempotencyKey: z
+        .string()
+        .min(8)
+        .max(128)
+        .optional()
+        .describe('Optional client-side idempotency key to avoid duplicate upgrades'),
 });
 
 export type UpgradeSubscriptionInput = z.infer<
     typeof upgradeSubscriptionSchema
 >;
+
+export const previewUpgradeSchema = z.object({
+    subscriptionId: z.string().uuid('Invalid subscription ID'),
+    newPlanId: z.string().uuid('Invalid plan ID'),
+});
+
+export type PreviewUpgradeInput = z.infer<typeof previewUpgradeSchema>;
 
 export const pauseSubscriptionSchema = z.object({
     subscriptionId: z.string().uuid('Invalid subscription ID'),

@@ -5,9 +5,11 @@ import permission from '../middlewares/permission.middleware';
 import { authRoutes as authModuleRoutes } from '../modules/auth';
 import { adminAuthRoutes } from '../modules/admin-panel/auth';
 import { contentManagementRoutes } from '../modules/admin-panel/contentManagement';
+import { dashboardRoutes } from '../modules/admin-panel/dashboard';
 import { chatRoutes } from '../modules/chat';
 import { voiceRoutes } from '../modules/voice';
 import { paymentRoutes } from '../modules/payments/routes/payment.routes';
+import { settingsRoutes } from '../modules/settings';
 import { Permission } from '@prisma/client';
 
 const router = Router();
@@ -30,10 +32,14 @@ router.use('/admin/auth', adminAuthRoutes);
 
 router.use('/admin/content-management', contentManagementRoutes);
 
+router.use('/admin/dashboard', dashboardRoutes);
+
 router.use('/chat', chatRoutes);
 
 router.use('/voice', voiceRoutes);
 
 router.use('/payments', paymentRoutes);
+
+router.use('/settings', settingsRoutes);
 
 export default router;

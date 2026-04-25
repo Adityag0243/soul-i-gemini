@@ -156,3 +156,19 @@ export interface UpgradeSubscriptionResponseDto {
     nextBillingDate: Date;
     proration?: number;
 }
+
+export interface UpgradePreviewResponseDto {
+    provider: 'stripe' | 'razorpay';
+    currentPlanId: string;
+    currentPlanName: string;
+    newPlanId: string;
+    newPlanName: string;
+    currentPeriodEnd?: Date;
+    proration: {
+        ratioRemaining: number;
+        oldPlanCreditInrPaise?: number;
+        newPlanCostInrPaise?: number;
+        finalChargeInrPaise?: number;
+        note: string;
+    };
+}
