@@ -12,6 +12,8 @@ import {
     sessionIdParamSchema,
     getSessionsQuerySchema,
     getMessagesQuerySchema,
+    completeSessionSchema,
+    markCouponPopupShownSchema,
 } from '../schemas/chat.schema';
 import * as ChatController from '../controllers/chat.controller';
 
@@ -184,6 +186,70 @@ registry.registerPath({
     },
 });
 
+// FREE SESSION ENDPOINTS
+
+registry.registerPath({
+    method: 'get',
+    path: '/chat/sessions/status/free',
+    summary: 'Get Free Session Status',
+    description:
+        'Get the current free session usage status for the authenticated user.',
+    tags: ['Chat', 'Free Sessions'],
+    security: [{ apiKey: [], bearerAuth: [] }],
+    responses: {
+        200: { description: 'Free session status retrieved' },
+        401: { description: 'Authentication required' },
+        404: { description: 'User not found' },
+    },
+});
+
+registry.registerPath({
+    method: 'post',
+    path: '/chat/sessions/{sessionId}/complete',
+    summary: 'Mark Session As Complete',
+    description:
+        'Mark a chat session as complete and increment free session counter if applicable.',
+    tags: ['Chat', 'Free Sessions'],
+    security: [{ apiKey: [], bearerAuth: [] }],
+    request: {
+        body: {
+            content: {
+                'application/json': {
+                    schema: completeSessionSchema,
+                },
+            },
+        },
+    },
+    responses: {
+        200: { description: 'Session completion status' },
+        400: { description: 'Validation error' },
+        401: { description: 'Authentication required' },
+        404: { description: 'Session not found' },
+    },
+});
+
+registry.registerPath({
+    method: 'post',
+    path: '/chat/sessions/coupon-popup/shown',
+    summary: 'Mark Coupon Popup As Shown',
+    description: 'Mark the coupon popup as shown for the authenticated user.',
+    tags: ['Chat', 'Free Sessions'],
+    security: [{ apiKey: [], bearerAuth: [] }],
+    request: {
+        body: {
+            content: {
+                'application/json': {
+                    schema: markCouponPopupShownSchema,
+                },
+            },
+        },
+    },
+    responses: {
+        200: { description: 'Coupon popup status updated' },
+        401: { description: 'Authentication required' },
+    },
+});
+
 // routes
 
 // session routes
@@ -242,6 +308,25 @@ router.get(
     validator(sessionIdParamSchema, ValidationSource.PARAM),
     validator(getMessagesQuerySchema, ValidationSource.QUERY),
     asyncHandler(ChatController.getMessages),
+);
+
+// Free session management routes
+router.get(
+    '/sessions/status/free',
+    asyncHandler(ChatController.getFreeSessionStatus),
+);
+
+router.post(
+    '/sessions/:sessionId/complete',
+    validator(sessionIdParamSchema, ValidationSource.PARAM),
+    validator(completeSessionSchema, ValidationSource.BODY),
+    asyncHandler(ChatController.completeSession),
+);
+
+router.post(
+    '/sessions/coupon-popup/shown',
+    validator(markCouponPopupShownSchema, ValidationSource.BODY),
+    asyncHandler(ChatController.markCouponPopupShown),
 );
 
 export default router;

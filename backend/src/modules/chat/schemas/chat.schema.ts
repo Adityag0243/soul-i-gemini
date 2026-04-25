@@ -71,11 +71,25 @@ export const getMessagesQuerySchema = z.object({
     offset: z.string().transform(Number).pipe(z.number().min(0)).optional(),
 });
 
+// complete session schema
+export const completeSessionSchema = z.object({
+    sessionId: z.string().uuid('Invalid session ID'),
+    phase: z.string().max(100).optional(), // e.g., "solution_complete"
+    turnCount: z.number().int().min(0).optional(),
+});
+
+// mark coupon popup shown schema
+export const markCouponPopupShownSchema = z.object({
+    shown: z.boolean().default(true),
+});
+
 // register schemas with OpenAPI registry
 registry.register('CreateSessionSchema', createSessionSchema);
 registry.register('UpdateSessionSchema', updateSessionSchema);
 registry.register('SendMessageSchema', sendMessageSchema);
 registry.register('SaveVoiceTranscriptSchema', saveVoiceTranscriptSchema);
+registry.register('CompleteSessionSchema', completeSessionSchema);
+registry.register('MarkCouponPopupShownSchema', markCouponPopupShownSchema);
 
 export type CreateSessionInput = z.infer<typeof createSessionSchema>;
 export type UpdateSessionInput = z.infer<typeof updateSessionSchema>;
@@ -86,3 +100,7 @@ export type SaveVoiceTranscriptInput = z.infer<
     typeof saveVoiceTranscriptSchema
 >;
 export type GetMessagesQuery = z.infer<typeof getMessagesQuerySchema>;
+export type CompleteSessionInput = z.infer<typeof completeSessionSchema>;
+export type MarkCouponPopupShownInput = z.infer<
+    typeof markCouponPopupShownSchema
+>;

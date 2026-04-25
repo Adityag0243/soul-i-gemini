@@ -20,6 +20,8 @@ import {
     SaveVoiceTranscriptResponseDto,
     SessionListResponseDto,
     MessageListResponseDto,
+    FreeSessionStatusDto,
+    SessionCompletionDto,
 } from '../dto/chat.dto';
 import {
     CreateSessionInput,
@@ -64,6 +66,9 @@ export async function createSession(
     userId: number,
     input: CreateSessionInput,
 ): Promise<ChatSessionDto> {
+    // Validate free session limit
+    await validateSessionCreationAllowed(userId);
+
     const session = await ChatSessionRepo.create({
         userId,
         title: input.title,
@@ -277,6 +282,17 @@ export async function sendMessage(
         if (newTitle) {
             await ChatSessionRepo.update(sessionId, { title: newTitle });
         }
+    }
+
+    // Update session with phase and turn count from AI response
+    if (aiResponse.phase || aiResponse.turnCount) {
+        await prisma.chatSession.update({
+            where: { id: sessionId },
+            data: {
+                phase: aiResponse.phase ?? undefined,
+                turnCount: aiResponse.turnCount ?? undefined,
+            },
+        });
     }
 
     const expertEscalationEnabled =
@@ -497,6 +513,204 @@ async function trackAnalyticsEvent(
     }
 }
 
+// FREE SESSION TRACKING
+
+const FREE_SESSIONS_LIMIT = 3; // Free users get 3 sessions
+
+/**
+ * Get free session status for a user
+ */
+export async function getFreeSessionStatus(
+    userId: number,
+): Promise<FreeSessionStatusDto> {
+    const user = await prisma.user.findUnique({
+        where: { id: userId },
+        include: {
+            userSubscriptions: {
+                where: { status: 'ACTIVE' },
+                take: 1,
+            },
+        },
+    });
+
+    if (!user) {
+        throw new NotFoundError('User not found');
+    }
+
+    const hasActiveSubscription =
+        user.userSubscriptions && user.userSubscriptions.length > 0;
+    const freeSessionsCompleted = user.freeSessionsCompleted || 0;
+    const freeSessionsRemaining = Math.max(
+        0,
+        FREE_SESSIONS_LIMIT - freeSessionsCompleted,
+    );
+
+    return {
+        freeSessionsCompleted,
+        freeSessionsRemaining,
+        canCreateNewSession: hasActiveSubscription || freeSessionsRemaining > 0,
+        hasActiveSubscription,
+        shouldShowCouponPopup:
+            !hasActiveSubscription &&
+            freeSessionsCompleted >= FREE_SESSIONS_LIMIT &&
+            !user.couponPopupShown,
+        couponPopupAlreadyShown: user.couponPopupShown,
+    };
+}
+
+/**
+ * Check if user can create a new chat session
+ * Throws BadRequestError if limit reached
+ */
+export async function validateSessionCreationAllowed(
+    userId: number,
+): Promise<void> {
+    const status = await getFreeSessionStatus(userId);
+
+    if (!status.canCreateNewSession) {
+        throw new BadRequestError(
+            'Free session limit reached. Please redeem a coupon for unlimited access.',
+        );
+    }
+}
+
+/**
+ * Mark a chat session as complete
+ * Checks if phase is "solution_complete" or turnCount > 20
+ */
+export async function completeSession(
+    userId: number,
+    sessionId: string,
+    phase?: string,
+    turnCount?: number,
+): Promise<SessionCompletionDto> {
+    // Verify session ownership
+    const session = await ChatSessionRepo.findByIdAndUserId(sessionId, userId);
+    if (!session) {
+        throw new NotFoundError('Chat session not found');
+    }
+
+    // Determine if session should be marked complete
+    const shouldComplete =
+        (phase && phase === 'solution_complete') || (turnCount ?? 0) > 20;
+
+    if (!shouldComplete) {
+        return {
+            sessionId,
+            isComplete: false,
+            phase,
+            turnCount: turnCount ?? 0,
+            freeSessionsCompleted: session.turnCount,
+            shouldShowCouponPopup: false,
+        };
+    }
+
+    // Update session
+    const updatedSession = await prisma.chatSession.update({
+        where: { id: sessionId },
+        data: {
+            isComplete: true,
+            phase: phase ?? session.phase,
+            turnCount: turnCount ?? session.turnCount,
+            endedAt: new Date(),
+        },
+    });
+
+    // Get user and check subscription
+    const user = await prisma.user.findUnique({
+        where: { id: userId },
+        include: {
+            userSubscriptions: {
+                where: { status: 'ACTIVE' },
+                take: 1,
+            },
+        },
+    });
+
+    if (!user) {
+        throw new NotFoundError('User not found');
+    }
+
+    const hasActiveSubscription =
+        user.userSubscriptions && user.userSubscriptions.length > 0;
+
+    // If user has active subscription, don't increment free sessions
+    if (hasActiveSubscription) {
+        logger.info('Session completed for paid user', {
+            sessionId,
+            userId,
+        });
+
+        return {
+            sessionId,
+            isComplete: true,
+            phase: updatedSession.phase ?? undefined,
+            turnCount: updatedSession.turnCount,
+            freeSessionsCompleted: user.freeSessionsCompleted,
+            shouldShowCouponPopup: false,
+        };
+    }
+
+    // Increment free sessions completed for free users
+    const updatedUser = await prisma.user.update({
+        where: { id: userId },
+        data: {
+            freeSessionsCompleted: {
+                increment: 1,
+            },
+        },
+    });
+
+    const newTotalCompleted = updatedUser.freeSessionsCompleted;
+    const shouldShowPopup =
+        newTotalCompleted >= FREE_SESSIONS_LIMIT && !user.couponPopupShown;
+
+    logger.info('Session completed for free user', {
+        sessionId,
+        userId,
+        freeSessionsCompleted: newTotalCompleted,
+        shouldShowCouponPopup: shouldShowPopup,
+    });
+
+    // Track analytics
+    await trackAnalyticsEvent(userId, 'session_completed', {
+        sessionId,
+        phase: updatedSession.phase,
+        turnCount: updatedSession.turnCount,
+        freeSessionsCompleted: newTotalCompleted,
+    });
+
+    return {
+        sessionId,
+        isComplete: true,
+        phase: updatedSession.phase ?? undefined,
+        turnCount: updatedSession.turnCount,
+        freeSessionsCompleted: newTotalCompleted,
+        shouldShowCouponPopup: shouldShowPopup,
+    };
+}
+
+/**
+ * Mark coupon popup as shown for user
+ */
+export async function markCouponPopupShown(
+    userId: number,
+): Promise<{ popupShown: boolean; message: string }> {
+    await prisma.user.update({
+        where: { id: userId },
+        data: {
+            couponPopupShown: true,
+        },
+    });
+
+    logger.info('Coupon popup marked as shown', { userId });
+
+    return {
+        popupShown: true,
+        message: 'Coupon popup status updated',
+    };
+}
+
 export default {
     createSession,
     getSessions,
@@ -507,4 +721,8 @@ export default {
     sendMessage,
     saveVoiceTranscript,
     getMessages,
+    getFreeSessionStatus,
+    validateSessionCreationAllowed,
+    completeSession,
+    markCouponPopupShown,
 };

@@ -40,6 +40,8 @@ async function findByEmail(email: string): Promise<AuthUser | null> {
         })),
         verified: user.verified,
         status: user.status,
+        freeSessionsCompleted: user.freeSessionsCompleted,
+        couponPopupShown: user.couponPopupShown,
         createdAt: user.createdAt,
         updatedAt: user.updatedAt,
     };
@@ -133,6 +135,8 @@ async function create(
                 ),
                 verified: userWithRoles!.verified,
                 status: userWithRoles!.status,
+                freeSessionsCompleted: userWithRoles!.freeSessionsCompleted,
+                couponPopupShown: userWithRoles!.couponPopupShown,
                 createdAt: userWithRoles!.createdAt,
                 updatedAt: userWithRoles!.updatedAt,
             },
@@ -189,6 +193,8 @@ async function findById(id: number): Promise<AuthUser | null> {
         ),
         verified: user.verified,
         status: user.status,
+        freeSessionsCompleted: user.freeSessionsCompleted,
+        couponPopupShown: user.couponPopupShown,
         createdAt: user.createdAt,
         updatedAt: user.updatedAt,
     };
