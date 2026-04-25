@@ -1,6 +1,7 @@
 import {
     FeedbackType,
     MessageRole,
+    Prisma,
     PracticeStatus,
     RoleCode,
 } from '@prisma/client';
@@ -183,6 +184,42 @@ function extractStringMetadataValue(
     return trimmed ? trimmed : null;
 }
 
+function isMissingTableError(error: unknown): boolean {
+    if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2021'
+    ) {
+        return true;
+    }
+
+    if (error instanceof Error) {
+        return /does not exist|table .* does not exist/i.test(error.message);
+    }
+
+    return false;
+}
+
+async function withMissingTableFallback<T>(
+    operation: Promise<T>,
+    onFallback: () => T,
+    fallbackModules: string[],
+    notes: string[],
+    moduleKey: string,
+    note: string,
+): Promise<T> {
+    try {
+        return await operation;
+    } catch (error) {
+        if (isMissingTableError(error)) {
+            fallbackModules.push(moduleKey);
+            notes.push(note);
+            return onFallback();
+        }
+
+        throw error;
+    }
+}
+
 async function getDashboardOverview(
     adminUser: AuthUser,
 ): Promise<DashboardOverviewDto> {
@@ -194,6 +231,54 @@ async function getDashboardOverview(
     const sevenDays = getPeriod(7, 0);
     const previousSevenDays = getPeriod(7, 7);
     const dayBuckets = getRecentDays(7);
+
+    const practiceDistributionRowsPromise = withMissingTableFallback(
+        prisma.practiceTask.groupBy({
+            by: ['practiceType'],
+            where: {
+                isActive: true,
+                status: PracticeStatus.ACTIVE,
+            },
+            _count: {
+                _all: true,
+            },
+        }),
+        () =>
+            [] as Array<{
+                practiceType: string;
+                _count: { _all: number };
+            }>,
+        fallbackModules,
+        notes,
+        'charts.practiceDistribution',
+        'Practice task table is missing in this environment. Returned fallback practice distribution values.',
+    );
+
+    const feedbackRowsPromise = withMissingTableFallback(
+        prisma.practiceFeedback.findMany({
+            include: {
+                practice: {
+                    select: {
+                        title: true,
+                    },
+                },
+            },
+            take: 500,
+            orderBy: {
+                createdAt: 'desc',
+            },
+        }),
+        () =>
+            [] as Array<{
+                feedback: FeedbackType;
+                createdAt: Date;
+                practice: { title: string };
+            }>,
+        fallbackModules,
+        notes,
+        'charts.completionRates',
+        'Practice feedback tables are missing in this environment. Returned fallback completion and satisfaction values.',
+    );
 
     const [
         totalUsers,
@@ -351,29 +436,8 @@ async function getDashboardOverview(
                 startedAt: true,
             },
         }),
-        prisma.practiceTask.groupBy({
-            by: ['practiceType'],
-            where: {
-                isActive: true,
-                status: PracticeStatus.ACTIVE,
-            },
-            _count: {
-                _all: true,
-            },
-        }),
-        prisma.practiceFeedback.findMany({
-            include: {
-                practice: {
-                    select: {
-                        title: true,
-                    },
-                },
-            },
-            take: 500,
-            orderBy: {
-                createdAt: 'desc',
-            },
-        }),
+        practiceDistributionRowsPromise,
+        feedbackRowsPromise,
         prisma.analyticsEvent.findMany({
             include: {
                 user: {

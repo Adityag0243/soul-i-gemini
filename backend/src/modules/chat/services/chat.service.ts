@@ -4,6 +4,7 @@ import {
     ChatSession,
     ChatMessage,
     Prisma,
+    FeatureKey,
 } from '@prisma/client';
 import { prisma } from '../../../database';
 import { BadRequestError, NotFoundError } from '../../../core/api-error';
@@ -11,6 +12,7 @@ import logger from '../../../core/logger';
 import ChatSessionRepo from '../repositories/chat-session.repo';
 import ChatMessageRepo from '../repositories/chat-message.repo';
 import AIService from './ai.service';
+import FeatureControlService from '../../admin-panel/featureControl/services/feature-control.service';
 import {
     ChatSessionDto,
     ChatMessageDto,
@@ -277,11 +279,22 @@ export async function sendMessage(
         }
     }
 
+    const expertEscalationEnabled =
+        await FeatureControlService.isFeatureEnabled(
+            FeatureKey.EXPERT_ESCALATION,
+        );
+    const shouldEscalateToExpert =
+        expertEscalationEnabled &&
+        (aiResponse.crisisLevel === CrisisLevel.MEDIUM ||
+            aiResponse.crisisLevel === CrisisLevel.HIGH);
+
     return {
         userMessage: toMessageDto(userMessage),
         assistantMessage: toMessageDto(assistantMessage),
         detectedEmotion: aiResponse.detectedEmotion,
         crisisLevel: aiResponse.crisisLevel,
+        expertEscalationEnabled,
+        shouldEscalateToExpert,
         phase: aiResponse.phase,
         energyNode: aiResponse.energyNode,
         turnCount: aiResponse.turnCount,

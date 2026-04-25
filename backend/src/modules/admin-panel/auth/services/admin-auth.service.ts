@@ -178,7 +178,22 @@ export async function refreshTokenPair(
     );
 }
 
+export async function logoutCurrentSession(
+    userId: number,
+    keystoreId: number,
+): Promise<void> {
+    const adminUser = await getAdminUser(userId);
+
+    await prisma.keystore.deleteMany({
+        where: {
+            id: keystoreId,
+            clientId: adminUser.id,
+        },
+    });
+}
+
 export default {
     loginWithEmail,
     refreshTokenPair,
+    logoutCurrentSession,
 };
