@@ -78,7 +78,7 @@ with st.sidebar:
     st.markdown("### 🔬 Dev Pages")
     _page = st.radio(
         "Select page",
-        ["Ollama Engine", "🤖 Gemini Engine"],
+        ["🤖 Gemini Engine", "Ollama Engine"],
         label_visibility="collapsed",
         key="dev_page_selector",
     )
@@ -107,7 +107,7 @@ with left_col:
     st.markdown('<hr class="dbg-divider"/>', unsafe_allow_html=True)
 
     tab_current, tab_history, tab_qdrant, tab_session = st.tabs([
-        "📍 Current Turn",
+        "📍 Current Turn.",
         "🕑 Turn History",
         "🗄️ Qdrant Inspector",
         "🗃️ Session State",

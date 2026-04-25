@@ -190,8 +190,18 @@ class GeminiEngine:
         """
         if self.state is None:
             self.new_session()
-
-        text = "Hi, I'm Souli. I'm here with you. How's your energy feeling right now?"
+        opening_texts=[
+            "Hi, I'm Souli. I'm here with you. How are you feeling right now?",
+            "Hii, I'm Souli. I'm here to listen. What brings you here today and how are you feeling?",
+            "Hello, I'm Souli. I'm here to support you. What's on your mind today?",
+            "Hi there, I'm Souli. I'm here to listen. How's your energy feeling right now?",
+            "Hello, I'm Souli. I'm here with you. What are you noticing in yourself right now?",
+            "Hi, I'm Souli. I'm here to sit with you. How are you feeling right now?",
+            "hi, I'm Souli. I'm here to listen. How is your day going and how are you feeling right now?",
+        ]
+        # text = "Hi, I'm Souli. I'm here with you. How's your energy feeling right now?"
+        import random
+        text = random.choice(opening_texts)
         self.state.messages.append({"role": "assistant", "content": text})
         self._mongo_append(role="assistant", phase=PHASE_GREETING, content=text)
         return text

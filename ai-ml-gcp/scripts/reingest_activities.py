@@ -109,23 +109,36 @@ def extract_activities_from_file(
     return chunks
 
 
-def wipe_activities_collection(host: str, port: int, dry_run: bool):
-    """Delete and recreate the souli_activities collection."""
+
+def wipe_activities_collection(dry_run: bool):
+    """Delete and recreate the souli_activities collection using Cloud credentials."""
     if dry_run:
-        logger.info("[DRY RUN] Would wipe souli_activities collection")
+        # logger.info("[DRY RUN] Would wipe souli_activities collection")
         return
+
+    # Fetch credentials from environment
+    url = f'https://{os.getenv("QDRANT_HOST")}' # Ensure this is the full URL (e.g., https://...)
+    api_key = os.getenv("QDRANT_API_KEY")
+    
+    
+    logger.info("url fetched....")
+    if not url or not api_key:
+        logger.error("QDRANT_HOST or QDRANT_API_KEY environment variables are missing.")
+        sys.exit(1)
 
     try:
         from qdrant_client import QdrantClient
-        client = QdrantClient(host=host, port=port, timeout=10)
-        collections = {c.name for c in client.get_collections().collections}
-        if "souli_activities" in collections:
+        # Initialize client with URL and API key
+        client = QdrantClient(url=url, api_key=api_key, timeout=10)
+        
+        if client.collection_exists("souli_activities"):
             client.delete_collection("souli_activities")
             logger.info("Deleted souli_activities collection")
         else:
-            logger.info("souli_activities collection doesn't exist yet — will be created fresh")
+            logger.info("souli_activities collection doesn't exist yet")
+            
     except Exception as e:
-        logger.error("Could not connect to Qdrant at %s:%d — %s", host, port, e)
+        logger.error("Could not connect to Qdrant Cloud: %s", e)
         sys.exit(1)
 
 
@@ -134,7 +147,7 @@ def main():
     parser.add_argument("--outputs-dir", default="outputs", help="Path to your outputs/ folder")
     parser.add_argument("--ollama-model", default="llama3.1")
     parser.add_argument("--ollama-endpoint", default="http://localhost:11434")
-    parser.add_argument("--qdrant-host", default="localhost")
+    parser.add_argument("--qdrant-host", default=os.getenv("QDRANT_HOST", "localhost"))
     parser.add_argument("--qdrant-port", type=int, default=6333)
     parser.add_argument("--dry-run", action="store_true", help="Extract but don't push to Qdrant")
     args = parser.parse_args()
@@ -178,15 +191,16 @@ def main():
         return
 
     # Step 4: Wipe old collection
-    wipe_activities_collection(args.qdrant_host, args.qdrant_port, dry_run=False)
+    wipe_activities_collection( dry_run=False)
 
     # Step 5: Push all new chunks
     from souli_pipeline.retrieval.qdrant_store_multi import ingest_typed_chunks
     count = ingest_typed_chunks(
         chunks=all_chunks,
         chunk_type="activities",
-        host=args.qdrant_host,
-        port=args.qdrant_port,
+        url = f'https://{os.getenv("QDRANT_HOST")}', # Ensure this is the full URL (e.g., https://...)
+        api_key = os.getenv("QDRANT_API_KEY")
+        host=os.getenv("QDRANT_HOST", "localhost"),
     )
     logger.info("✅ Done! Ingested %d activity chunks into souli_activities", count)
 

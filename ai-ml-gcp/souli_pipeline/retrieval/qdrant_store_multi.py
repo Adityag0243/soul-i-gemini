@@ -141,7 +141,6 @@ def _embed(texts: List[str], model_name: str = _DEFAULT_MODEL) -> List[List[floa
         texts, convert_to_numpy=True, show_progress_bar=False
     ).tolist()
 
-
 def _content_uuid(text: str, source: str, chunk_type: str) -> str:
     """
     Deterministic UUID from content + source + chunk_type.
@@ -155,7 +154,7 @@ def _content_uuid(text: str, source: str, chunk_type: str) -> str:
 # ---------------------------------------------------------------------------
 # Single-collection typed ingest
 # ---------------------------------------------------------------------------
-
+import os
 def ingest_typed_chunks(
     chunks: List[Dict],
     chunk_type: str,
@@ -203,8 +202,8 @@ def ingest_typed_chunks(
 
     if len(deduped) < len(valid):
         logger.info("[MULTI] Dropped %d duplicate chunks for type '%s'.", len(valid) - len(deduped), chunk_type)
-
-    client = _get_qdrant_client(host, port)
+    
+    client = _get_qdrant_client(host=host, port=port)
     _ensure_collection(client, collection)
 
     total    = len(deduped)
