@@ -6,6 +6,7 @@ import { authRoutes as authModuleRoutes } from '../modules/auth';
 import { adminAuthRoutes } from '../modules/admin-panel/auth';
 import { contentManagementRoutes } from '../modules/admin-panel/contentManagement';
 import { dashboardRoutes } from '../modules/admin-panel/dashboard';
+import { featureControlRoutes } from '../modules/admin-panel/featureControl';
 import { chatRoutes } from '../modules/chat';
 import { voiceRoutes } from '../modules/voice';
 import { paymentRoutes } from '../modules/payments/routes/payment.routes';
@@ -33,6 +34,8 @@ router.use('/admin/auth', adminAuthRoutes);
 router.use('/admin/content-management', contentManagementRoutes);
 
 router.use('/admin/dashboard', dashboardRoutes);
+
+router.use('/admin/feature-control', featureControlRoutes);
 
 router.use('/chat', chatRoutes);
 

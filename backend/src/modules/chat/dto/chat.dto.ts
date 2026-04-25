@@ -26,6 +26,8 @@ export interface SendMessageResponseDto {
     assistantMessage: ChatMessageDto;
     detectedEmotion?: string;
     crisisLevel: CrisisLevel;
+    expertEscalationEnabled: boolean;
+    shouldEscalateToExpert: boolean;
     phase?: string;
     energyNode?: string | null;
     turnCount?: number;

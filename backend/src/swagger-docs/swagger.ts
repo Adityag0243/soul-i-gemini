@@ -73,6 +73,11 @@ export function generateOpenAPIDocument() {
                 description:
                     'Admin analytics overview for user activity, chatbot metrics, and funnel insights.',
             },
+            {
+                name: 'Admin Feature Control',
+                description:
+                    'Admin controls for platform feature flags such as expert escalation and voice input.',
+            },
         ],
         // Default: use API key so "Authorize" is visible and x-api-key is sent with requests
         security: [{ apiKey: [] }],

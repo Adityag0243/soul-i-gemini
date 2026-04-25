@@ -62,7 +62,29 @@ export async function refreshTokens(
     ).send(res);
 }
 
+function clearAdminCookies(res: Response): void {
+    const adminCookieOptions = {
+        ...cookieOptions,
+        path: '/admin',
+    };
+
+    res.clearCookie(CookieKeys.REFRESH_TOKEN, adminCookieOptions);
+    res.clearCookie(CookieKeys.ACCESS_TOKEN, adminCookieOptions);
+}
+
+export async function logout(
+    req: ProtectedRequest,
+    res: Response,
+): Promise<void> {
+    await AdminAuthService.logoutCurrentSession(req.user.id, req.keystore.id);
+
+    clearAdminCookies(res);
+
+    new SuccessResponse('Admin logout successful', null).send(res);
+}
+
 export default {
     emailLogin,
     refreshTokens,
+    logout,
 };
