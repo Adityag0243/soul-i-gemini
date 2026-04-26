@@ -14,6 +14,7 @@ import AIService, { SouliSessionState } from './ai.service';
 import {
     ChatSessionDto,
     ChatMessageDto,
+    FreeTierStatusDto,
     SendMessageResponseDto,
     SaveVoiceTranscriptResponseDto,
     SessionListResponseDto,
@@ -43,15 +44,43 @@ function toSessionDto(session: SessionWithCount): ChatSessionDto {
     };
 }
 
-function toMessageDto(message: ChatMessage): ChatMessageDto {
+function toMessageDto(
+    message: ChatMessage,
+    session: ChatSession,
+): ChatMessageDto {
     return {
         id: message.id,
         sessionId: message.sessionId,
         role: message.role,
         content: message.content,
+        createdAt: message.createdAt,
         tokenCount: message.tokenCount,
         crisisLevel: message.crisisLevel,
-        createdAt: message.createdAt,
+        detectedEmotion: message.detectedEmotion,
+        phase: message.phase,
+        energyNode: message.energyNode,
+        secondaryNode: message.secondaryNode,
+        nodeReasoning: message.nodeReasoning,
+        turnCount: message.turnCount,
+        solutionStep: message.solutionStep,
+        ragSources: message.ragSources,
+        // Session-level signals denormalized onto the message (D5)
+        isSolutionComplete: session.solutionComplete,
+        threeDayTask: session.threeDayTask,
+        audioUrl: message.audioUrl,
+        durationMs: message.durationMs,
+    };
+}
+
+// Free-tier status block on chat responses. Phase 6.4 wires real values from
+// User.freeSessionsCompleted; until then this stubs to "no usage" so mobile
+// can develop against the contract.
+function buildFreeTierStatus(session: ChatSession): FreeTierStatusDto {
+    return {
+        used: 0,
+        total: 3,
+        isComplete: session.isComplete,
+        showCouponPopup: false,
     };
 }
 
@@ -305,16 +334,17 @@ export async function sendMessage(
         }
     }
 
+    // Re-fetch the session so the response reflects the just-mirrored AI state
+    // and any title update.
+    const updatedSession =
+        (await ChatSessionRepo.findById(sessionId)) ?? session;
+
     return {
-        userMessage: toMessageDto(userMessage),
-        assistantMessage: toMessageDto(assistantMessage),
-        detectedEmotion: aiResponse.detectedEmotion,
-        crisisLevel: aiResponse.crisisLevel,
-        phase: aiResponse.phase,
-        energyNode: aiResponse.energyNode,
-        turnCount: aiResponse.turnCount,
-        energy_node: aiResponse.energyNode,
-        turn_count: aiResponse.turnCount,
+        userMessage: toMessageDto(userMessage, updatedSession),
+        aiMessage: toMessageDto(assistantMessage, updatedSession),
+        session: toSessionDto(updatedSession),
+        crisisResources: null,
+        freeTier: buildFreeTierStatus(updatedSession),
     };
 }
 
@@ -388,12 +418,11 @@ export async function saveVoiceTranscript(
     });
 
     return {
-        userMessage: toMessageDto(userMessage),
-        assistantMessage: assistantMessage
-            ? toMessageDto(assistantMessage)
+        userMessage: toMessageDto(userMessage, session),
+        aiMessage: assistantMessage
+            ? toMessageDto(assistantMessage, session)
             : null,
-        detectedEmotion: input.detectedEmotion,
-        crisisLevel: userCrisisLevel,
+        session: toSessionDto(session),
     };
 }
 
@@ -434,7 +463,7 @@ export async function getMessages(
     const total = await ChatMessageRepo.countBySessionId(sessionId);
 
     return {
-        messages: messages.map(toMessageDto),
+        messages: messages.map((m) => toMessageDto(m, session)),
         total,
         sessionId,
     };
