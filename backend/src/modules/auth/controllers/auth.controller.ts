@@ -6,7 +6,11 @@ import {
 } from '../../../core/api-response';
 import { clearCookies } from '../../../core/cookie-utils';
 import { setCookies } from '../../../core/cookie-utils';
-import { getAccessToken, getRefreshToken } from '../../../core/auth-utils';
+import {
+    getAccessToken,
+    getRefreshToken,
+    tryGetUserIdFromToken,
+} from '../../../core/auth-utils';
 import { ProtectedRequest } from '../../../types/app-requests';
 import AuthService from '../services/auth.service';
 import {
@@ -20,6 +24,8 @@ import {
     ForgotPasswordResetInput,
     LegacyResetPasswordInput,
     EmailVerifyConfirmInput,
+    MobileOtpSendInput,
+    MobileOtpVerifyInput,
     ResetJourneyInput,
     EraseAllDataInput,
 } from '../schemas/auth.schema';
@@ -270,4 +276,39 @@ export async function confirmEmailVerification(
         input,
     );
     new SuccessResponse('Email verified', result).send(res);
+}
+
+// send mobile OTP — handles both intent=login (no auth needed) and intent=link
+// (requires Authorization). Optional-auth: tryGetUserIdFromToken returns null
+// when no bearer is present.
+// POST /auth/mobile/otp/send
+export async function sendMobileOtp(
+    req: Request<object, object, MobileOtpSendInput>,
+    res: Response,
+): Promise<void> {
+    const linkUserId = await tryGetUserIdFromToken(req as ProtectedRequest);
+    const result = await AuthService.sendMobileOtp(req.body, linkUserId);
+    new SuccessResponse('OTP sent', result).send(res);
+}
+
+// verify mobile OTP — login intent returns auth payload (and sets cookies);
+// link intent returns { linked: true }. The OTP record's intent decides which.
+// POST /auth/mobile/otp/verify
+export async function verifyMobileOtp(
+    req: Request<object, object, MobileOtpVerifyInput>,
+    res: Response,
+): Promise<void> {
+    const authedUserId = await tryGetUserIdFromToken(req as ProtectedRequest);
+    const result = await AuthService.verifyMobileOtp(req.body, authedUserId);
+
+    if (result.kind === 'login') {
+        setCookies(res, result.auth.tokens);
+        new SuccessResponse('Login successful', {
+            user: result.auth.user,
+            tokens: result.auth.tokens,
+        }).send(res);
+        return;
+    }
+
+    new SuccessResponse('Mobile linked', { linked: true }).send(res);
 }

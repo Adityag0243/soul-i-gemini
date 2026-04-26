@@ -93,6 +93,20 @@ export const emailVerifyConfirmSchema = z.object({
     otp: z.string().regex(/^\d{6}$/, 'OTP must be exactly 6 digits'),
 });
 
+// Mobile OTP. Number is E.164 (e.g. +919876543210). Permissive 8–15 digit
+// regex; libphonenumber-js can replace this when we need stricter validation.
+export const mobileOtpSendSchema = z.object({
+    mobileNumber: z
+        .string()
+        .regex(/^\+\d{8,15}$/, 'Invalid mobile number — must be E.164 (e.g. +919876543210)'),
+    intent: z.enum(['login', 'link']),
+});
+
+export const mobileOtpVerifySchema = z.object({
+    requestId: z.string().uuid('Invalid requestId'),
+    otp: z.string().regex(/^\d{6}$/, 'OTP must be exactly 6 digits'),
+});
+
 // Legacy single-shot reset (kept for 1 release per D7). Combines verify+reset
 // in one body — the controller chains internally so the new 3-step flow is
 // the single source of truth.
@@ -160,6 +174,8 @@ registry.register('ForgotPasswordVerifySchema', forgotPasswordVerifySchema);
 registry.register('ForgotPasswordResetSchema', forgotPasswordResetSchema);
 registry.register('LegacyResetPasswordSchema', legacyResetPasswordSchema);
 registry.register('EmailVerifyConfirmSchema', emailVerifyConfirmSchema);
+registry.register('MobileOtpSendSchema', mobileOtpSendSchema);
+registry.register('MobileOtpVerifySchema', mobileOtpVerifySchema);
 registry.register('AuthRequestSchema', authRequestSchema);
 
 export type EmailRegisterInput = z.infer<typeof emailRegisterSchema>;
@@ -183,3 +199,5 @@ export type LegacyResetPasswordInput = z.infer<
     typeof legacyResetPasswordSchema
 >;
 export type EmailVerifyConfirmInput = z.infer<typeof emailVerifyConfirmSchema>;
+export type MobileOtpSendInput = z.infer<typeof mobileOtpSendSchema>;
+export type MobileOtpVerifyInput = z.infer<typeof mobileOtpVerifySchema>;

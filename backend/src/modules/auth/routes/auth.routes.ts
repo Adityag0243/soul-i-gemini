@@ -17,6 +17,8 @@ import {
     forgotPasswordResetSchema,
     legacyResetPasswordSchema,
     emailVerifyConfirmSchema,
+    mobileOtpSendSchema,
+    mobileOtpVerifySchema,
     resetJourneySchema,
     eraseAllDataSchema,
 } from '../schemas/auth.schema';
@@ -398,6 +400,56 @@ registry.registerPath({
 
 registry.registerPath({
     method: 'post',
+    path: '/auth/mobile/otp/send',
+    summary: 'Send mobile OTP',
+    description:
+        'Sends a 6-digit OTP via SMS for `intent=login` (unauthenticated) or `intent=link` (auth required). Returns `requestId` to pass to /verify. Throttled at 5 sends per hour per mobile number; 60-second resend cooldown.',
+    tags: ['Auth'],
+    security: [{ apiKey: [] }],
+    request: {
+        body: {
+            content: {
+                'application/json': {
+                    schema: mobileOtpSendSchema,
+                },
+            },
+        },
+    },
+    responses: {
+        200: { description: 'OTP sent' },
+        400: { description: 'Validation or already-linked-elsewhere' },
+        401: { description: 'intent=link without Authorization' },
+        429: { description: 'Rate limit or resend cooldown' },
+    },
+});
+
+registry.registerPath({
+    method: 'post',
+    path: '/auth/mobile/otp/verify',
+    summary: 'Verify mobile OTP',
+    description:
+        'Verifies the OTP for the given `requestId`. On success: `intent=login` returns the standard auth payload (creating the user on first verify); `intent=link` returns `{ linked: true }`. After 5 wrong tries, returns 429.',
+    tags: ['Auth'],
+    security: [{ apiKey: [] }],
+    request: {
+        body: {
+            content: {
+                'application/json': {
+                    schema: mobileOtpVerifySchema,
+                },
+            },
+        },
+    },
+    responses: {
+        200: { description: 'Login or link succeeded' },
+        400: { description: 'Validation error' },
+        401: { description: 'Invalid or expired OTP' },
+        429: { description: 'Too many wrong attempts' },
+    },
+});
+
+registry.registerPath({
+    method: 'post',
     path: '/auth/email/verify/confirm',
     summary: 'Confirm email verification OTP',
     description:
@@ -536,6 +588,21 @@ router.post(
     authMiddleware as unknown as RequestHandler,
     validator(emailVerifyConfirmSchema, ValidationSource.BODY),
     asyncHandler(AuthController.confirmEmailVerification),
+);
+
+// Mobile OTP (Phase 4.3) — auth is optional; controller resolves it with
+// tryGetUserIdFromToken since the same route handles login (no auth) and
+// link (auth required).
+router.post(
+    '/mobile/otp/send',
+    validator(mobileOtpSendSchema, ValidationSource.BODY),
+    asyncHandler(AuthController.sendMobileOtp),
+);
+
+router.post(
+    '/mobile/otp/verify',
+    validator(mobileOtpVerifySchema, ValidationSource.BODY),
+    asyncHandler(AuthController.verifyMobileOtp),
 );
 
 export default router;

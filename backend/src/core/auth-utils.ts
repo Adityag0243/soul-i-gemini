@@ -19,6 +19,30 @@ export const getAccessToken = (req: ProtectedRequest) => {
     throw new AuthFailureError('Access token missing');
 };
 
+// Optional-auth: returns the userId if a valid access token is present,
+// otherwise returns null. Used by endpoints whose body has both authenticated
+// and unauthenticated forms (e.g. /auth/mobile/otp/* with intent=login|link).
+// Validates the JWT shape but does NOT verify the keystore — that level of
+// check belongs in authMiddleware proper. If present-but-invalid, throws.
+export const tryGetUserIdFromToken = async (
+    req: ProtectedRequest,
+): Promise<number | null> => {
+    const authHeader = req.headers.authorization;
+    const headerToken =
+        authHeader && authHeader.startsWith('Bearer ')
+            ? authHeader.split(' ')[1]
+            : undefined;
+    const cookieToken: string | undefined = req.cookies?.accessToken;
+    const token = headerToken ?? cookieToken;
+    if (!token || token.trim().length === 0) return null;
+
+    const payload = await JWT.validate(token);
+    validateTokenData(payload);
+    const userId = parseInt(payload.sub, 10);
+    if (isNaN(userId)) throw new AuthFailureError('Invalid user ID in token');
+    return userId;
+};
+
 export const getRefreshToken = (req: ProtectedRequest) => {
     if (req.body?.refreshToken) {
         return req.body.refreshToken;

@@ -127,6 +127,7 @@ model User {
   referralsReceived Referral[]         @relation("ReferredRelation")
   analyticsEvents   AnalyticsEvent[]
   deviceTokens      UserDeviceToken[]
+  mobileOtps        MobileOtp[]
 
   @@index([email])
   @@map("users")
@@ -212,6 +213,37 @@ model AuthToken {
   @@unique([tokenHash])
   @@index([userId])
   @@map("auth_tokens")
+}
+
+// Mobile OTP records (Phase 4.3). Separate from AuthToken because a LOGIN-intent
+// OTP has no user yet (user is created on successful verify). requestId returned
+// from /send IS this row's id; /verify looks it up by id, validates the hash,
+// and (on login) materializes the user + MOBILE AuthIdentity. attemptCount caps
+// brute force at 5 wrong tries.
+enum MobileOtpIntent {
+  LOGIN
+  LINK
+}
+
+model MobileOtp {
+  id           String          @id @default(uuid()) @db.Uuid
+  mobileNumber String          @map("mobile_number") @db.VarChar(20)
+  tokenHash    String          @map("token_hash")
+  intent       MobileOtpIntent
+  // Set only for LINK intent (the authenticated user attaching the number).
+  // null for LOGIN intent.
+  userId       Int?            @map("user_id")
+  attemptCount Int             @default(0) @map("attempt_count")
+  expiresAt    DateTime        @map("expires_at")
+  revoked      Boolean         @default(false)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([mobileNumber, createdAt])
+  @@index([userId])
+  @@map("mobile_otps")
 }
 
 // Push notification device tokens.

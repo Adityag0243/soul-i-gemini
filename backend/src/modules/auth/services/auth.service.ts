@@ -3,6 +3,7 @@ import argon2 from 'argon2';
 import { OAuth2Client } from 'google-auth-library';
 import {
     AuthProvider,
+    MobileOtpIntent,
     PaymentProvider,
     Prisma,
     RoleCode,
@@ -21,12 +22,14 @@ import { createTokens, validateTokenData } from '../../../core/auth-utils';
 import JWT from '../../../core/jwt-utils';
 import AuthIdentityRepo from '../repositories/auth-identity.repo';
 import AuthTokenRepo from '../repositories/auth-token.repo';
+import MobileOtpRepo from '../repositories/mobile-otp.repo';
 import { subscriptionRepository } from '../../../database/repositories/subscription.repo';
 import stripeGateway from '../../../infrastructure/paymentGateways/stripe.gateway';
 import razorpayGateway from '../../../infrastructure/paymentGateways/razorpay.gateway';
 import logger from '../../../core/logger';
 import { passwordResetEmailService } from '../../../infrastructure/email/password-reset-email.service';
 import { emailVerificationEmailService } from '../../../infrastructure/email/email-verification.service';
+import { smsService } from '../../../infrastructure/sms/sms.service';
 import {
     AuthResponseDto,
     AnonymousAuthResponseDto,
@@ -47,6 +50,8 @@ import {
     ForgotPasswordVerifyInput,
     ForgotPasswordResetInput,
     EmailVerifyConfirmInput,
+    MobileOtpSendInput,
+    MobileOtpVerifyInput,
     ResetJourneyInput,
     EraseAllDataInput,
 } from '../schemas/auth.schema';
@@ -111,6 +116,20 @@ const EMAIL_VERIFY_SECRET =
     process.env.JWT_PRIVATE_KEY ||
     'souli-email-verify';
 
+// Mobile OTP constants (BACKEND_API.md §4.21–4.22, §20).
+// 5 minute OTP expiry per the doc's `expiresInSeconds: 300`.
+// 60 second resend cooldown per `resendAvailableInSeconds: 60`.
+// 5 sends/hr per mobileNumber. 5 wrong tries → OTP_TOO_MANY_ATTEMPTS.
+const MOBILE_OTP_EXPIRY_MINUTES = 5;
+const MOBILE_OTP_RESEND_COOLDOWN_SECONDS = 60;
+const MOBILE_OTP_RATE_LIMIT_COUNT = 5;
+const MOBILE_OTP_RATE_LIMIT_WINDOW_MINUTES = 60;
+const MOBILE_OTP_MAX_ATTEMPTS = 5;
+const MOBILE_OTP_SECRET =
+    process.env.MOBILE_OTP_SECRET ||
+    process.env.JWT_PRIVATE_KEY ||
+    'souli-mobile-otp';
+
 function normalizeEmail(email: string): string {
     return email.trim().toLowerCase();
 }
@@ -144,6 +163,17 @@ function hashEmailVerifyOtp(
         .update(
             `${EMAIL_VERIFY_SECRET}:verify:${userId}:${normalizeEmail(email)}:${otp}`,
         )
+        .digest('hex');
+}
+
+function normalizeMobile(mobileNumber: string): string {
+    return mobileNumber.trim();
+}
+
+function hashMobileOtp(mobileNumber: string, otp: string): string {
+    return crypto
+        .createHash('sha256')
+        .update(`${MOBILE_OTP_SECRET}:${normalizeMobile(mobileNumber)}:${otp}`)
         .digest('hex');
 }
 
@@ -967,6 +997,237 @@ export async function confirmEmailVerification(
     return { user: dto };
 }
 
+// Mobile OTP — request. Issues a 6-digit code valid for 5 minutes.
+// `linkUserId` is non-null iff intent === 'link' (controller resolves auth).
+// Returns the OTP record id as `requestId` — the client passes it back to
+// /verify, which looks up the record by id and validates the OTP hash.
+export async function sendMobileOtp(
+    input: MobileOtpSendInput,
+    linkUserId: number | null,
+): Promise<{
+    requestId: string;
+    expiresInSeconds: number;
+    resendAvailableInSeconds: number;
+}> {
+    const mobileNumber = normalizeMobile(input.mobileNumber);
+
+    if (input.intent === 'link' && linkUserId === null) {
+        throw new AuthFailureError('Authorization required for link intent');
+    }
+
+    // Resend cooldown — independent of the rate-limit window. Stops a client
+    // from spamming send within the 5/hour budget by hammering once a second.
+    const lastSend = await MobileOtpRepo.findMostRecentByMobile(mobileNumber);
+    if (lastSend) {
+        const elapsed = (Date.now() - lastSend.createdAt.getTime()) / 1000;
+        if (elapsed < MOBILE_OTP_RESEND_COOLDOWN_SECONDS) {
+            const wait = Math.ceil(
+                MOBILE_OTP_RESEND_COOLDOWN_SECONDS - elapsed,
+            );
+            throw new TooManyRequestsError(
+                'Please wait before requesting another OTP',
+                wait,
+            );
+        }
+    }
+
+    const windowStart = new Date(
+        Date.now() - MOBILE_OTP_RATE_LIMIT_WINDOW_MINUTES * 60 * 1000,
+    );
+    const recentSends = await MobileOtpRepo.countByMobileSince(
+        mobileNumber,
+        windowStart,
+    );
+    if (recentSends >= MOBILE_OTP_RATE_LIMIT_COUNT) {
+        throw new TooManyRequestsError(
+            'Too many OTP requests — please try again later',
+            MOBILE_OTP_RATE_LIMIT_WINDOW_MINUTES * 60,
+        );
+    }
+
+    if (input.intent === 'link') {
+        const existing = await AuthIdentityRepo.findByProviderAndMobile(
+            AuthProvider.MOBILE,
+            mobileNumber,
+        );
+        if (existing && existing.userId !== linkUserId) {
+            throw new BadRequestError(
+                'Mobile number is already linked to another account',
+            );
+        }
+    }
+
+    const otp = generateResetOtp();
+    const tokenHash = hashMobileOtp(mobileNumber, otp);
+    const expiresAt = new Date(
+        Date.now() + MOBILE_OTP_EXPIRY_MINUTES * 60 * 1000,
+    );
+
+    const record = await MobileOtpRepo.create({
+        mobileNumber,
+        tokenHash,
+        intent:
+            input.intent === 'login'
+                ? MobileOtpIntent.LOGIN
+                : MobileOtpIntent.LINK,
+        userId: linkUserId,
+        expiresAt,
+    });
+
+    await smsService.sendOtp(mobileNumber, otp);
+
+    return {
+        requestId: record.id,
+        expiresInSeconds: MOBILE_OTP_EXPIRY_MINUTES * 60,
+        resendAvailableInSeconds: MOBILE_OTP_RESEND_COOLDOWN_SECONDS,
+    };
+}
+
+export type VerifyMobileOtpResult =
+    | { kind: 'login'; auth: AuthResponseDto }
+    | { kind: 'link'; linked: true };
+
+// Mobile OTP — verify. On wrong OTP increments attempt count; the 6th wrong try
+// (or beyond) returns 429 OTP_TOO_MANY_ATTEMPTS. On the success path:
+//   - LOGIN intent: load existing user by mobile, or create a fresh one + MOBILE
+//     identity if first-time. Returns standard AuthResponseDto.
+//   - LINK intent: requires authedUserId === record.userId. Upserts the MOBILE
+//     identity onto the user. Returns { linked: true }.
+export async function verifyMobileOtp(
+    input: MobileOtpVerifyInput,
+    authedUserId: number | null,
+): Promise<VerifyMobileOtpResult> {
+    const record = await MobileOtpRepo.findById(input.requestId);
+    if (
+        !record ||
+        record.revoked ||
+        record.expiresAt.getTime() <= Date.now()
+    ) {
+        throw new AuthFailureError('Invalid or expired OTP');
+    }
+
+    if (record.attemptCount >= MOBILE_OTP_MAX_ATTEMPTS) {
+        throw new TooManyRequestsError(
+            'Too many wrong attempts — request a new OTP',
+        );
+    }
+
+    const expectedHash = hashMobileOtp(record.mobileNumber, input.otp);
+    if (record.tokenHash !== expectedHash) {
+        await MobileOtpRepo.incrementAttempt(record.id);
+        throw new AuthFailureError('Invalid or expired OTP');
+    }
+
+    if (record.intent === MobileOtpIntent.LINK) {
+        if (!authedUserId || authedUserId !== record.userId) {
+            // Defense in depth — send refused if userIds didn't match, but if
+            // we got here without an auth or with a different one, treat the
+            // OTP as invalid rather than leak which case it was.
+            throw new AuthFailureError('Invalid or expired OTP');
+        }
+
+        await prisma.$transaction(async (tx) => {
+            await tx.mobileOtp.update({
+                where: { id: record.id },
+                data: { revoked: true },
+            });
+
+            const existing = await tx.authIdentity.findFirst({
+                where: {
+                    provider: AuthProvider.MOBILE,
+                    mobileNumber: record.mobileNumber,
+                },
+            });
+            if (!existing) {
+                await tx.authIdentity.create({
+                    data: {
+                        userId: record.userId!,
+                        provider: AuthProvider.MOBILE,
+                        mobileNumber: record.mobileNumber,
+                        mobileVerified: true,
+                    },
+                });
+            } else if (existing.userId !== record.userId) {
+                throw new BadRequestError(
+                    'Mobile number is already linked to another account',
+                );
+            } else {
+                await tx.authIdentity.update({
+                    where: { id: existing.id },
+                    data: { mobileVerified: true },
+                });
+            }
+        });
+
+        return { kind: 'link', linked: true };
+    }
+
+    // LOGIN intent.
+    const existingIdentity = await AuthIdentityRepo.findByProviderAndMobile(
+        AuthProvider.MOBILE,
+        record.mobileNumber,
+    );
+
+    if (existingIdentity) {
+        const user = await prisma.user.findUnique({
+            where: { id: existingIdentity.userId },
+            include: {
+                roles: {
+                    include: {
+                        role: { select: { id: true, code: true } },
+                    },
+                },
+            },
+        });
+        if (!user || !user.status) {
+            throw new AuthFailureError('User account is disabled');
+        }
+
+        await MobileOtpRepo.revoke(record.id);
+
+        const keystore = await createSession(user.id);
+        const tokens = await createTokens(
+            user,
+            keystore.primaryKey,
+            keystore.secondaryKey,
+        );
+
+        return {
+            kind: 'login',
+            auth: {
+                user: await serializeUserForAuth(user),
+                tokens,
+            },
+        };
+    }
+
+    // First-time login → create user + MOBILE identity.
+    const { user, keystore } = await createUserWithSession({
+        verified: false,
+    });
+    await AuthIdentityRepo.create({
+        userId: user.id,
+        provider: AuthProvider.MOBILE,
+        mobileNumber: record.mobileNumber,
+        mobileVerified: true,
+    });
+    await MobileOtpRepo.revoke(record.id);
+
+    const tokens = await createTokens(
+        user,
+        keystore.primaryKey,
+        keystore.secondaryKey,
+    );
+
+    return {
+        kind: 'login',
+        auth: {
+            user: await serializeUserForAuth(user),
+            tokens,
+        },
+    };
+}
+
 // restore anonymous session using Souli Key
 
 export async function restoreWithSouliKey(
@@ -1148,6 +1409,8 @@ export default {
     resetPassword,
     requestEmailVerificationOtp,
     confirmEmailVerification,
+    sendMobileOtp,
+    verifyMobileOtp,
     restoreWithSouliKey,
     linkGoogleAccount,
     getLinkedProviders,
