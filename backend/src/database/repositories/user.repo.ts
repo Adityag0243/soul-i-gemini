@@ -29,19 +29,12 @@ async function findByEmail(email: string): Promise<AuthUser | null> {
     if (!user) return null;
 
     return {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        password: user.password,
+        ...user,
         roles: user.roles.map((ur) => ({
             id: ur.role.id,
             code: ur.role.code as RoleCode,
             status: ur.role.status,
         })),
-        verified: user.verified,
-        status: user.status,
-        createdAt: user.createdAt,
-        updatedAt: user.updatedAt,
     };
 }
 
@@ -110,31 +103,20 @@ async function create(
 
         return {
             user: {
-                id: userWithRoles!.id,
-                name: userWithRoles!.name,
-                email: userWithRoles!.email,
-                password: userWithRoles!.password,
+                ...userWithRoles!,
                 roles: userWithRoles!.roles.map(
                     (ur: {
                         role: {
                             id: number;
                             code: string;
                             status: boolean;
-                            createdAt: Date;
-                            updatedAt: Date;
                         };
                     }) => ({
                         id: ur.role.id,
                         code: ur.role.code as RoleCode,
                         status: ur.role.status,
-                        createdAt: ur.role.createdAt,
-                        updatedAt: ur.role.updatedAt,
                     }),
                 ),
-                verified: userWithRoles!.verified,
-                status: userWithRoles!.status,
-                createdAt: userWithRoles!.createdAt,
-                updatedAt: userWithRoles!.updatedAt,
             },
             keystore,
         };
@@ -166,31 +148,20 @@ async function findById(id: number): Promise<AuthUser | null> {
     if (!user) return null;
 
     return {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        password: user.password,
+        ...user,
         roles: user.roles.map(
             (ur: {
                 role: {
                     id: number;
                     code: string;
                     status: boolean;
-                    createdAt: Date;
-                    updatedAt: Date;
                 };
             }) => ({
                 id: ur.role.id,
                 code: ur.role.code as RoleCode,
                 status: ur.role.status,
-                createdAt: ur.role.createdAt,
-                updatedAt: ur.role.updatedAt,
             }),
         ),
-        verified: user.verified,
-        status: user.status,
-        createdAt: user.createdAt,
-        updatedAt: user.updatedAt,
     };
 }
 

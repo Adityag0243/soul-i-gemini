@@ -80,6 +80,27 @@ model User {
   status   Boolean @default(true)
   verified Boolean @default(false)
 
+  // Profile (Phase 3 — D3 canonical user shape)
+  callName       String?   @map("call_name") @db.VarChar(100)
+  avatarUrl      String?   @map("avatar_url") @db.Text
+  // ISO 3166-1 alpha-2 country code; IANA timezone; IETF BCP 47 locale.
+  country        String?   @db.VarChar(2)
+  timezone       String?   @db.VarChar(64)
+  locale         String?   @db.VarChar(10)
+  // DATE not TIMESTAMP — birthdays are timezone-agnostic.
+  dateOfBirth    DateTime? @map("date_of_birth") @db.Date
+  gender         String?   @db.VarChar(50)
+  // Default TTS voice the user prefers; AI service voice id.
+  preferredVoice String?   @map("preferred_voice") @db.VarChar(100)
+
+  // Notification opt-outs. Default ON — explicit opt-out model (D20).
+  pushNotificationsEnabled  Boolean @default(true) @map("push_notifications_enabled")
+  emailNotificationsEnabled Boolean @default(true) @map("email_notifications_enabled")
+
+  // Onboarding gate + activity tracking (insights / cron / churn).
+  onboardingCompleted Boolean   @default(false) @map("onboarding_completed")
+  lastActiveAt        DateTime? @map("last_active_at")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
 
