@@ -15,6 +15,7 @@ import {
     forgotPasswordRequestSchema,
     forgotPasswordVerifySchema,
     forgotPasswordResetSchema,
+    legacyResetPasswordSchema,
     resetJourneySchema,
     eraseAllDataSchema,
 } from '../schemas/auth.schema';
@@ -329,6 +330,55 @@ registry.registerPath({
     },
 });
 
+registry.registerPath({
+    method: 'post',
+    path: '/auth/forgot-password',
+    summary: '[Legacy] Forgot Password',
+    description:
+        'Legacy alias for POST /auth/password/forgot — same body and response. Kept for 1 release while mobile migrates (D7).',
+    tags: ['Auth'],
+    security: [{ apiKey: [] }],
+    request: {
+        body: {
+            content: {
+                'application/json': {
+                    schema: forgotPasswordRequestSchema,
+                },
+            },
+        },
+    },
+    responses: {
+        200: { description: 'OTP sent successfully' },
+        400: { description: 'Validation error' },
+        403: { description: 'Missing or invalid API key' },
+    },
+});
+
+registry.registerPath({
+    method: 'post',
+    path: '/auth/reset-password',
+    summary: '[Legacy] Reset Password (single-shot)',
+    description:
+        'Legacy single-shot alias that takes { email, otp, newPassword, confirmPassword } and chains the 3-step flow internally. Kept for 1 release (D7).',
+    tags: ['Auth'],
+    security: [{ apiKey: [] }],
+    request: {
+        body: {
+            content: {
+                'application/json': {
+                    schema: legacyResetPasswordSchema,
+                },
+            },
+        },
+    },
+    responses: {
+        200: { description: 'Password reset successfully' },
+        400: { description: 'Validation error' },
+        401: { description: 'Invalid or expired OTP' },
+        403: { description: 'Missing or invalid API key' },
+    },
+});
+
 // routes
 
 //register
@@ -418,6 +468,19 @@ router.post(
     '/password/forgot/reset',
     validator(forgotPasswordResetSchema, ValidationSource.BODY),
     asyncHandler(AuthController.resetForgotPassword),
+);
+
+// Legacy aliases (D7 — kept for 1 release while mobile migrates)
+router.post(
+    '/forgot-password',
+    validator(forgotPasswordRequestSchema, ValidationSource.BODY),
+    asyncHandler(AuthController.requestForgotPasswordOtp),
+);
+
+router.post(
+    '/reset-password',
+    validator(legacyResetPasswordSchema, ValidationSource.BODY),
+    asyncHandler(AuthController.legacyResetPassword),
 );
 
 export default router;

@@ -88,6 +88,21 @@ export const forgotPasswordResetSchema = z
         path: ['confirmPassword'],
     });
 
+// Legacy single-shot reset (kept for 1 release per D7). Combines verify+reset
+// in one body — the controller chains internally so the new 3-step flow is
+// the single source of truth.
+export const legacyResetPasswordSchema = z
+    .object({
+        email: z.string().email('Invalid email format'),
+        otp: z.string().regex(/^\d{6}$/, 'OTP must be exactly 6 digits'),
+        newPassword: passwordSchema,
+        confirmPassword: z.string().min(1, 'Confirm password is required'),
+    })
+    .refine((data) => data.newPassword === data.confirmPassword, {
+        message: 'Passwords do not match',
+        path: ['confirmPassword'],
+    });
+
 export const authRequestSchema = z
     .object({
         headers: z.object({
@@ -138,6 +153,7 @@ registry.register('EraseAllDataSchema', eraseAllDataSchema);
 registry.register('ForgotPasswordRequestSchema', forgotPasswordRequestSchema);
 registry.register('ForgotPasswordVerifySchema', forgotPasswordVerifySchema);
 registry.register('ForgotPasswordResetSchema', forgotPasswordResetSchema);
+registry.register('LegacyResetPasswordSchema', legacyResetPasswordSchema);
 registry.register('AuthRequestSchema', authRequestSchema);
 
 export type EmailRegisterInput = z.infer<typeof emailRegisterSchema>;
@@ -156,4 +172,7 @@ export type ForgotPasswordVerifyInput = z.infer<
 >;
 export type ForgotPasswordResetInput = z.infer<
     typeof forgotPasswordResetSchema
+>;
+export type LegacyResetPasswordInput = z.infer<
+    typeof legacyResetPasswordSchema
 >;

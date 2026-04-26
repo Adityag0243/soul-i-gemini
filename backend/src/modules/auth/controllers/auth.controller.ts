@@ -18,6 +18,7 @@ import {
     ForgotPasswordRequestInput,
     ForgotPasswordVerifyInput,
     ForgotPasswordResetInput,
+    LegacyResetPasswordInput,
     ResetJourneyInput,
     EraseAllDataInput,
 } from '../schemas/auth.schema';
@@ -222,6 +223,26 @@ export async function resetForgotPassword(
     res: Response,
 ): Promise<void> {
     const result = await AuthService.resetPassword(req.body);
+
+    new SuccessResponse(result.message, null).send(res);
+}
+
+// Legacy single-shot reset (D7 — kept for 1 release).
+// POST /auth/reset-password
+// Chains the new 3-step flow internally so there's only one source of truth
+// for password reset semantics.
+export async function legacyResetPassword(
+    req: Request<object, object, LegacyResetPasswordInput>,
+    res: Response,
+): Promise<void> {
+    const { email, otp, newPassword, confirmPassword } = req.body;
+
+    const verified = await AuthService.verifyPasswordResetOtp({ email, otp });
+    const result = await AuthService.resetPassword({
+        resetToken: verified.resetToken,
+        newPassword,
+        confirmPassword,
+    });
 
     new SuccessResponse(result.message, null).send(res);
 }
