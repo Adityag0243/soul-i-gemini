@@ -308,6 +308,28 @@ export async function confirmEmailVerification(
     new SuccessResponse('Email verified', result).send(res);
 }
 
+// logout current session
+// POST /auth/logout
+export async function logout(
+    req: ProtectedRequest,
+    res: Response,
+): Promise<void> {
+    await AuthService.logout(req.keystore.id);
+    clearCookies(res);
+    new SuccessResponse('Logged out', null).send(res);
+}
+
+// logout all sessions for this user
+// POST /auth/logout-all
+export async function logoutAll(
+    req: ProtectedRequest,
+    res: Response,
+): Promise<void> {
+    const revokedSessions = await AuthService.logoutAll(req.user.id);
+    clearCookies(res);
+    new SuccessResponse('All sessions revoked', { revokedSessions }).send(res);
+}
+
 // send mobile OTP — handles both intent=login (no auth needed) and intent=link
 // (requires Authorization). Optional-auth: tryGetUserIdFromToken returns null
 // when no bearer is present.

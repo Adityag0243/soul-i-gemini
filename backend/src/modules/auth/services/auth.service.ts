@@ -1521,6 +1521,17 @@ export async function eraseAllData(
     };
 }
 
+async function logout(keystoreId: number): Promise<void> {
+    await prisma.keystore.delete({ where: { id: keystoreId } });
+}
+
+async function logoutAll(userId: number): Promise<number> {
+    const result = await prisma.keystore.deleteMany({
+        where: { clientId: userId },
+    });
+    return result.count;
+}
+
 export default {
     registerWithEmail,
     loginWithEmail,
@@ -1541,4 +1552,6 @@ export default {
     getLinkedProviders,
     resetJourney,
     eraseAllData,
+    logout,
+    logoutAll,
 };

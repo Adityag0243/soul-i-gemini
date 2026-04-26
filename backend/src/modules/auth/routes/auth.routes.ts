@@ -31,10 +31,40 @@ const router = Router();
 
 registry.registerPath({
     method: 'post',
-    path: '/auth/token/refresh',
+    path: '/auth/refresh',
     summary: 'Refresh tokens',
     description:
-        'Issue new access and refresh tokens. Send refresh token in body or cookies and provide access token in Authorization header or cookies.',
+        'Exchange a valid refresh token for a new access+refresh pair. Send refresh token in body or cookies and access token in Authorization header or cookies. Old refresh token is revoked on success.',
+    tags: ['Auth'],
+    security: [{ apiKey: [] }],
+    request: {
+        body: {
+            content: {
+                'application/json': {
+                    schema: refreshTokenSchema,
+                },
+            },
+        },
+    },
+    responses: {
+        200: {
+            description: 'New tokens issued',
+        },
+        401: {
+            description: 'Invalid or expired tokens',
+        },
+        403: {
+            description: 'Missing or invalid API key',
+        },
+    },
+});
+
+registry.registerPath({
+    method: 'post',
+    path: '/auth/token/refresh',
+    summary: '[Legacy] Refresh tokens',
+    description:
+        'Legacy alias for POST /auth/refresh — same behavior. Kept for 1 release while mobile migrates.',
     tags: ['Auth'],
     security: [{ apiKey: [] }],
     request: {
@@ -523,6 +553,36 @@ registry.registerPath({
     },
 });
 
+registry.registerPath({
+    method: 'post',
+    path: '/auth/logout',
+    summary: 'Logout (current session)',
+    description:
+        'Revoke the current keystore session (this device only). Clears auth cookies.',
+    tags: ['Auth'],
+    security: [{ bearerAuth: [], apiKey: [] }],
+    responses: {
+        200: { description: 'Logged out' },
+        401: { description: 'Authentication required' },
+        403: { description: 'Missing or invalid API key' },
+    },
+});
+
+registry.registerPath({
+    method: 'post',
+    path: '/auth/logout-all',
+    summary: 'Logout all sessions',
+    description:
+        'Revoke ALL active keystore sessions for this user (all devices). Clears auth cookies.',
+    tags: ['Auth'],
+    security: [{ bearerAuth: [], apiKey: [] }],
+    responses: {
+        200: { description: 'All sessions revoked' },
+        401: { description: 'Authentication required' },
+        403: { description: 'Missing or invalid API key' },
+    },
+});
+
 // routes
 
 //register
@@ -560,7 +620,15 @@ router.post(
     asyncHandler(AuthController.anonymousLogin),
 );
 
-// refresh token pair
+// refresh token pair (canonical path)
+router.post(
+    '/refresh',
+    validator(authRequestSchema, ValidationSource.REQUEST),
+    validator(refreshTokenSchema, ValidationSource.REQUEST),
+    asyncHandler(AuthController.refreshTokens),
+);
+
+// legacy alias — kept for 1 release while mobile migrates
 router.post(
     '/token/refresh',
     validator(authRequestSchema, ValidationSource.REQUEST),
@@ -594,6 +662,18 @@ router.get(
     '/providers',
     authMiddleware as unknown as RequestHandler,
     asyncHandler(AuthController.getProviders),
+);
+
+router.post(
+    '/logout',
+    authMiddleware as unknown as RequestHandler,
+    asyncHandler(AuthController.logout),
+);
+
+router.post(
+    '/logout-all',
+    authMiddleware as unknown as RequestHandler,
+    asyncHandler(AuthController.logoutAll),
 );
 
 router.post(

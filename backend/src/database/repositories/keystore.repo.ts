@@ -31,10 +31,11 @@ async function remove(id: number): Promise<void> {
     });
 }
 
-async function removeByClientId(clientId: number): Promise<void> {
-    await prisma.keystore.deleteMany({
+async function removeByClientId(clientId: number): Promise<number> {
+    const result = await prisma.keystore.deleteMany({
         where: { clientId },
     });
+    return result.count;
 }
 
 async function findForKey(
