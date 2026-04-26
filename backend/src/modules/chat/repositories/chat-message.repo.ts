@@ -119,6 +119,12 @@ async function countBySessionId(sessionId: string): Promise<number> {
     });
 }
 
+async function countUserMessagesBySessionId(sessionId: string): Promise<number> {
+    return prisma.chatMessage.count({
+        where: { sessionId, role: MessageRole.USER },
+    });
+}
+
 /**
  * Delete all messages in a session
  */
@@ -194,6 +200,7 @@ export default {
     findBySessionId,
     getRecentMessages,
     countBySessionId,
+    countUserMessagesBySessionId,
     deleteBySessionId,
     updateCrisisLevel,
     findCrisisMessages,

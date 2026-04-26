@@ -108,6 +108,10 @@ model User {
   onboardingCompleted Boolean   @default(false) @map("onboarding_completed")
   lastActiveAt        DateTime? @map("last_active_at")
 
+  // Free-tier tracking (D12, D13).
+  freeSessionsCompleted Int     @default(0) @map("free_sessions_completed")
+  couponPopupShown      Boolean @default(false) @map("coupon_popup_shown")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
 

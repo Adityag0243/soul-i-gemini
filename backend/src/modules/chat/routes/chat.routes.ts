@@ -186,6 +186,34 @@ registry.registerPath({
 
 registry.registerPath({
     method: 'get',
+    path: '/chat/sessions/status/free',
+    summary: 'Free-tier status',
+    description:
+        'Read free-tier counter for paywall logic. Returns used/total sessions, blocked flag, and coupon popup flag.',
+    tags: ['Chat'],
+    security: [{ apiKey: [], bearerAuth: [] }],
+    responses: {
+        200: { description: 'Free tier status retrieved' },
+        401: { description: 'Authentication required' },
+    },
+});
+
+registry.registerPath({
+    method: 'post',
+    path: '/chat/sessions/coupon-popup/shown',
+    summary: 'Acknowledge coupon popup',
+    description:
+        'Sets User.couponPopupShown = true so the popup is not shown again.',
+    tags: ['Chat'],
+    security: [{ apiKey: [], bearerAuth: [] }],
+    responses: {
+        200: { description: 'Acknowledged' },
+        401: { description: 'Authentication required' },
+    },
+});
+
+registry.registerPath({
+    method: 'get',
     path: '/chat/sessions/{sessionId}/ai-state',
     summary: 'Get AI Session State',
     description:
@@ -213,6 +241,16 @@ router.get(
     '/sessions',
     validator(getSessionsQuerySchema, ValidationSource.QUERY),
     asyncHandler(ChatController.getSessions),
+);
+
+router.get(
+    '/sessions/status/free',
+    asyncHandler(ChatController.getFreeTierStatus),
+);
+
+router.post(
+    '/sessions/coupon-popup/shown',
+    asyncHandler(ChatController.acknowledgeCouponPopup),
 );
 
 router.get(

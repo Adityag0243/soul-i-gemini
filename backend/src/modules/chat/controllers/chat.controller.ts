@@ -141,6 +141,26 @@ export async function getSessionAiState(
     new SuccessResponse('AI state retrieved', state).send(res);
 }
 
+// free-tier status
+// GET /chat/sessions/status/free
+export async function getFreeTierStatus(
+    req: ProtectedRequest,
+    res: Response,
+): Promise<void> {
+    const result = await ChatService.getFreeTierStatus(req.user.id);
+    new SuccessResponse('Free tier status', result).send(res);
+}
+
+// acknowledge coupon popup
+// POST /chat/sessions/coupon-popup/shown
+export async function acknowledgeCouponPopup(
+    req: ProtectedRequest,
+    res: Response,
+): Promise<void> {
+    await ChatService.acknowledgeCouponPopup(req.user.id);
+    new SuccessResponse('Coupon popup acknowledged', null).send(res);
+}
+
 //get messages for a session
 //GET /chat/sessions/:sessionId/messages
 export async function getMessages(

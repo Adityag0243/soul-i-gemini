@@ -7,6 +7,7 @@ import {
     NotFoundResponse,
     BadRequestResponse,
     ForbiddenResponse,
+    PaymentRequiredResponse,
     TooManyRequestsResponse,
 } from './api-response';
 
@@ -23,6 +24,7 @@ export enum ErrorType {
     BAD_REQUEST = 'BadRequestError',
     FORBIDDEN = 'ForbiddenError',
     RESOURCE_CONFLICT = 'ResourceConflict',
+    PAYMENT_REQUIRED = 'PaymentRequiredError',
     TOO_MANY_REQUESTS = 'TooManyRequestsError',
 }
 
@@ -54,6 +56,10 @@ export abstract class ApiError extends Error {
                 return new BadRequestResponse(err.message, false).send(res);
             case ErrorType.FORBIDDEN:
                 return new ForbiddenResponse(err.message, false).send(res);
+            case ErrorType.PAYMENT_REQUIRED:
+                return new PaymentRequiredResponse(err.message, false).send(
+                    res,
+                );
             case ErrorType.TOO_MANY_REQUESTS:
                 return new TooManyRequestsResponse(
                     err.message,
@@ -134,6 +140,12 @@ export class AccessTokenError extends ApiError {
 export class ResourceConflictError extends ApiError {
     constructor(message = 'Resource already exists') {
         super(ErrorType.RESOURCE_CONFLICT, message);
+    }
+}
+
+export class PaymentRequiredError extends ApiError {
+    constructor(message = 'Payment Required') {
+        super(ErrorType.PAYMENT_REQUIRED, message);
     }
 }
 

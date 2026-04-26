@@ -6,8 +6,13 @@ import {
     Prisma,
 } from '@prisma/client';
 import { prisma } from '../../../database';
-import { BadRequestError, NotFoundError } from '../../../core/api-error';
+import {
+    BadRequestError,
+    NotFoundError,
+    PaymentRequiredError,
+} from '../../../core/api-error';
 import logger from '../../../core/logger';
+import { subscriptionRepository } from '../../../database/repositories/subscription.repo';
 import ChatSessionRepo from '../repositories/chat-session.repo';
 import ChatMessageRepo from '../repositories/chat-message.repo';
 import AIService, { SouliSessionState } from './ai.service';
@@ -72,15 +77,18 @@ function toMessageDto(
     };
 }
 
-// Free-tier status block on chat responses. Phase 6.4 wires real values from
-// User.freeSessionsCompleted; until then this stubs to "no usage" so mobile
-// can develop against the contract.
-function buildFreeTierStatus(session: ChatSession): FreeTierStatusDto {
+async function buildFreeTierStatus(
+    userId: number,
+    session: ChatSession,
+): Promise<FreeTierStatusDto> {
+    const user = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
     return {
-        used: 0,
+        used: user.freeSessionsCompleted,
         total: 3,
         isComplete: session.isComplete,
-        showCouponPopup: false,
+        showCouponPopup:
+            user.freeSessionsCompleted >= 3 &&
+            !user.couponPopupShown,
     };
 }
 
@@ -91,6 +99,17 @@ export async function createSession(
     userId: number,
     input: CreateSessionInput,
 ): Promise<ChatSessionDto> {
+    // D12: block session creation when free tier exhausted and no active subscription.
+    const user = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    if (user.freeSessionsCompleted >= 3) {
+        const hasPaid = await subscriptionRepository.hasActivePaidSubscription(userId);
+        if (!hasPaid) {
+            throw new PaymentRequiredError(
+                'Free session limit reached — subscribe to continue',
+            );
+        }
+    }
+
     const session = await ChatSessionRepo.create({
         userId,
         title: input.title,
@@ -254,6 +273,22 @@ export async function sendMessage(
         await trackAnalyticsEvent(userId, 'chat_started', { sessionId });
     }
 
+    // D12: Mark session complete on 3rd user message and increment free-tier counter.
+    const userMessageCount = await ChatMessageRepo.countUserMessagesBySessionId(sessionId);
+    if (userMessageCount >= 3 && !session.isComplete) {
+        await prisma.$transaction([
+            prisma.chatSession.update({
+                where: { id: sessionId },
+                data: { isComplete: true },
+            }),
+            prisma.user.update({
+                where: { id: userId },
+                data: { freeSessionsCompleted: { increment: 1 } },
+            }),
+        ]);
+        logger.info('Session marked complete (3rd user message)', { sessionId, userId });
+    }
+
     // generate AI response
     const aiResponse = await AIService.generateResponse(
         conversationHistory,
@@ -344,7 +379,7 @@ export async function sendMessage(
         aiMessage: toMessageDto(assistantMessage, updatedSession),
         session: toSessionDto(updatedSession),
         crisisResources: null,
-        freeTier: buildFreeTierStatus(updatedSession),
+        freeTier: await buildFreeTierStatus(userId, updatedSession),
     };
 }
 
@@ -555,6 +590,24 @@ async function trackAnalyticsEvent(
     }
 }
 
+export async function getFreeTierStatus(userId: number) {
+    const user = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    const hasPaid = await subscriptionRepository.hasActivePaidSubscription(userId);
+    return {
+        used: user.freeSessionsCompleted,
+        total: 3,
+        blocked: user.freeSessionsCompleted >= 3 && !hasPaid,
+        showCouponPopup: user.freeSessionsCompleted >= 3 && !user.couponPopupShown,
+    };
+}
+
+export async function acknowledgeCouponPopup(userId: number): Promise<void> {
+    await prisma.user.update({
+        where: { id: userId },
+        data: { couponPopupShown: true },
+    });
+}
+
 export default {
     createSession,
     getSessions,
@@ -566,4 +619,6 @@ export default {
     saveVoiceTranscript,
     getMessages,
     getSessionAiState,
+    getFreeTierStatus,
+    acknowledgeCouponPopup,
 };
