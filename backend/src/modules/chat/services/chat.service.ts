@@ -256,6 +256,25 @@ export async function sendMessage(
         crisisLevel: aiResponse.crisisLevel,
     });
 
+    // Mirror AI state onto the session row so GET /sessions/{id} can serve
+    // the latest phase/energyNode/etc. without scanning messages, and so
+    // cron jobs (Phase 9 auto-archive, Phase 11 insights) can filter on
+    // lastActivityAt directly.
+    try {
+        await ChatSessionRepo.applyAssistantMessageMetadata(sessionId, {
+            phase: aiResponse.phase,
+            energyNode: aiResponse.energyNode,
+            secondaryNode: aiResponse.secondaryNode,
+            solutionStep: aiResponse.solutionStep,
+            tokensUsed: aiResponse.tokenCount,
+        });
+    } catch (error) {
+        logger.error('Failed to mirror AI metadata onto session', {
+            sessionId,
+            error,
+        });
+    }
+
     // Handle crisis detection
     if (
         aiResponse.crisisLevel === CrisisLevel.HIGH ||
