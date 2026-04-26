@@ -184,6 +184,22 @@ registry.registerPath({
     },
 });
 
+registry.registerPath({
+    method: 'get',
+    path: '/chat/sessions/{sessionId}/ai-state',
+    summary: 'Get AI Session State',
+    description:
+        'Proxy of the AI service GET /session/{id}/state. Returns the current AI-side conversation state (phase, energyNode, secondaryNode, solutionStep, threeDayTask, etc.). Empty object if AI has no state for this session yet.',
+    tags: ['Chat'],
+    security: [{ apiKey: [], bearerAuth: [] }],
+    responses: {
+        200: { description: 'AI state retrieved' },
+        401: { description: 'Authentication required' },
+        404: { description: 'Session not found' },
+        503: { description: 'AI service unavailable' },
+    },
+});
+
 // routes
 
 // session routes
@@ -242,6 +258,12 @@ router.get(
     validator(sessionIdParamSchema, ValidationSource.PARAM),
     validator(getMessagesQuerySchema, ValidationSource.QUERY),
     asyncHandler(ChatController.getMessages),
+);
+
+router.get(
+    '/sessions/:sessionId/ai-state',
+    validator(sessionIdParamSchema, ValidationSource.PARAM),
+    asyncHandler(ChatController.getSessionAiState),
 );
 
 export default router;

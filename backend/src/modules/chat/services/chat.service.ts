@@ -10,7 +10,7 @@ import { BadRequestError, NotFoundError } from '../../../core/api-error';
 import logger from '../../../core/logger';
 import ChatSessionRepo from '../repositories/chat-session.repo';
 import ChatMessageRepo from '../repositories/chat-message.repo';
-import AIService from './ai.service';
+import AIService, { SouliSessionState } from './ai.service';
 import {
     ChatSessionDto,
     ChatMessageDto,
@@ -397,6 +397,20 @@ export async function saveVoiceTranscript(
     };
 }
 
+// Proxy AI session state. Verifies ownership on our side, then forwards to AI
+// service GET /session/{id}/state. Response shape is whatever AI returns —
+// kept passthrough so Task 2.7 (AI enrichment) doesn't require a backend change.
+export async function getSessionAiState(
+    sessionId: string,
+    userId: number,
+): Promise<SouliSessionState> {
+    const session = await ChatSessionRepo.findByIdAndUserId(sessionId, userId);
+    if (!session) {
+        throw new NotFoundError('Chat session not found');
+    }
+    return AIService.getSessionState(sessionId);
+}
+
 // get messages for a session
 export async function getMessages(
     sessionId: string,
@@ -522,4 +536,5 @@ export default {
     sendMessage,
     saveVoiceTranscript,
     getMessages,
+    getSessionAiState,
 };

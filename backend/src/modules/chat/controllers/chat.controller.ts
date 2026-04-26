@@ -129,6 +129,18 @@ export async function saveVoiceTranscript(
     new SuccessCreatedResponse('Voice transcript saved', result).send(res);
 }
 
+// get AI conversation state (proxied from AI service)
+// GET /chat/sessions/:sessionId/ai-state
+export async function getSessionAiState(
+    req: ProtectedRequest,
+    res: Response,
+): Promise<void> {
+    const { sessionId } = req.params;
+    const state = await ChatService.getSessionAiState(sessionId, req.user.id);
+
+    new SuccessResponse('AI state retrieved', state).send(res);
+}
+
 //get messages for a session
 //GET /chat/sessions/:sessionId/messages
 export async function getMessages(

@@ -369,6 +369,69 @@ async function callOllamaAPI(
     }
 }
 
+// Shape of AI service GET /session/{session_id}/state response.
+// Fields are optional because Task 2.7 (AI side) is what enriches them; until then
+// only a subset is present. Extra keys are allowed to track AI changes without
+// forcing a backend update.
+export interface SouliSessionState {
+    session_id: string;
+    user_id?: string | null;
+    phase?: string | null;
+    energy_node?: string | null;
+    secondary_node?: string | null;
+    node_reasoning?: string | null;
+    commitment_status?: string | null;
+    solution_step?: number | null;
+    solution_complete?: boolean | null;
+    solution_steps_history?: unknown;
+    three_day_task?: unknown;
+    rag_sources_used?: unknown;
+    turn_count?: number | null;
+    last_updated_at?: string | null;
+    [key: string]: unknown;
+}
+
+export async function getSessionState(
+    sessionId: string,
+): Promise<SouliSessionState> {
+    try {
+        const response = await fetch(
+            buildServiceUrl(
+                `/session/${encodeURIComponent(sessionId)}/state`,
+            ),
+            {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+            },
+        );
+
+        // AI service returns 404 if it has never seen this session (user opened
+        // a brand-new session and hit /ai-state before sending the first message).
+        // Return an empty state rather than propagating 404 — the session does exist
+        // on our side, AI just doesn't have any state for it yet.
+        if (response.status === 404) {
+            return { session_id: sessionId };
+        }
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            logger.error('Souli session state API error:', {
+                status: response.status,
+                error: errorText,
+            });
+            throw new InternalError('AI service unavailable');
+        }
+
+        return (await response.json()) as SouliSessionState;
+    } catch (error) {
+        if (error instanceof InternalError) throw error;
+        logger.error('Souli session state API connection failed:', error);
+        throw new InternalError('AI service connection failed');
+    }
+}
+
 async function callSouliChatAPI(
     userMessage: string,
     sessionId: string,
@@ -592,6 +655,7 @@ export async function healthCheck(): Promise<boolean> {
 
 export default {
     generateResponse,
+    getSessionState,
     healthCheck,
     detectCrisisLevel,
     detectEmotion,
