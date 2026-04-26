@@ -70,6 +70,12 @@ enum FeedbackType {
   WORSE
 }
 
+enum DevicePlatform {
+  IOS
+  ANDROID
+  WEB
+}
+
 //user and auth
 
 model User {
@@ -119,6 +125,7 @@ model User {
   referralsGiven    Referral[]         @relation("ReferrerRelation")
   referralsReceived Referral[]         @relation("ReferredRelation")
   analyticsEvents   AnalyticsEvent[]
+  deviceTokens      UserDeviceToken[]
 
   @@index([email])
   @@map("users")
@@ -204,6 +211,30 @@ model AuthToken {
   @@unique([tokenHash])
   @@index([userId])
   @@map("auth_tokens")
+}
+
+// Push notification device tokens.
+// Token is unique across users — if a device changes hands the upsert at
+// registration time re-points the row to the new userId. isActive=false on
+// explicit logout so we can prune stale rows later.
+model UserDeviceToken {
+  id          String         @id @default(uuid()) @db.Uuid
+  userId      Int            @map("user_id")
+  token       String         @unique @db.VarChar(512)
+  platform    DevicePlatform
+  appVersion  String?        @map("app_version") @db.VarChar(50)
+  deviceModel String?        @map("device_model") @db.VarChar(255)
+  isActive    Boolean        @default(true) @map("is_active")
+  lastSeenAt  DateTime?      @map("last_seen_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, isActive])
+  @@map("user_device_tokens")
 }
 
 // Keystore - JWT session management
