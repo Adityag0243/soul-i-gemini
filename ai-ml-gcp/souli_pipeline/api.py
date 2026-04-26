@@ -32,12 +32,14 @@ import logging
 import os
 import tempfile
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel
+
+from souli_pipeline.storage import mongo_store as _mongo
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 
@@ -162,11 +164,21 @@ class ChatResponse(BaseModel):
 
 class SessionState(BaseModel):
     session_id: str
+    user_id: Optional[str] = None  # always null in v1 (D11 — anonymous on AI side)
     phase: str
-    energy_node: Optional[str]
+    energy_node: Optional[str] = None
+    secondary_node: Optional[str] = None
+    node_reasoning: Optional[str] = None
+    commitment_status: Optional[str] = None
     turn_count: int
-    intent: Optional[str]
-    user_name: Optional[str]
+    intent: Optional[str] = None
+    user_name: Optional[str] = None
+    solution_step: Optional[int] = None
+    solution_complete: bool = False
+    solution_steps_history: List[Dict[str, Any]] = []
+    three_day_task: Optional[Any] = None  # populated by Phase 13 webhook flow
+    rag_sources_used: List[Dict[str, Any]] = []
+    last_updated_at: Optional[str] = None
 
 
 class ResetResponse(BaseModel):
@@ -342,20 +354,61 @@ def reset_session(session_id: str = Form(...)):
 def get_session_state(session_id: str):
     """
     Get the current conversation state for a session.
-    Useful for the mobile app to show progress indicators or debug.
+    Returns full AI metadata — phase, energy nodes, commitment status,
+    solution progress, RAG sources, last-update timestamp. Used by the
+    backend to proxy AI state to mobile via GET /chat/sessions/{id}/ai-state.
     """
-    if session_id not in _sessions:
+    # /chat puts sessions in _gemini_sessions; the previous implementation
+    # only checked the legacy _sessions store, so it 404'd for every active
+    # session. Check both, prefer Gemini.
+    gemini_engine = _gemini_sessions.get(session_id)
+    legacy_engine = _sessions.get(session_id) if gemini_engine is None else None
+
+    if gemini_engine is None and legacy_engine is None:
         raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found")
 
-    engine = _sessions[session_id]
-    diag = engine.diagnosis_summary
+    # Pull persisted metadata (user_id is always null per D11; _last_updated
+    # for cache freshness signals on mobile). Document may not exist yet for
+    # an in-memory-only legacy session.
+    mongo_doc = _mongo.get_session(session_id) or {}
+    metadata = mongo_doc.get("session_metadata", {})
+
+    if gemini_engine is not None:
+        state = gemini_engine.state
+        diag = gemini_engine.diagnosis_summary
+        return SessionState(
+            session_id=session_id,
+            user_id=metadata.get("user_id"),
+            phase=diag.get("phase") or (state.phase if state else "greeting"),
+            energy_node=state.energy_node if state else None,
+            secondary_node=state.secondary_node if state else None,
+            node_reasoning=state.node_reasoning if state else None,
+            commitment_status=state.commitment_status if state else None,
+            turn_count=state.turn_count if state else 0,
+            intent=None,      # gemini engine doesn't track intent
+            user_name=None,   # gemini engine doesn't track user_name
+            solution_step=state.solution_step if state else None,
+            solution_complete=state.solution_complete if state else False,
+            solution_steps_history=state.solution_steps_history if state else [],
+            three_day_task=None,  # Phase 13 webhook flow surfaces this later
+            rag_sources_used=state.solution_rag_chunks if state else [],
+            last_updated_at=mongo_doc.get("_last_updated"),
+        )
+
+    # Legacy ConversationEngine fallback
+    diag = legacy_engine.diagnosis_summary
     return SessionState(
         session_id=session_id,
-        phase=engine.state.phase,
+        user_id=metadata.get("user_id"),
+        phase=legacy_engine.state.phase,
         energy_node=diag.get("energy_node"),
-        turn_count=engine.state.turn_count,
-        intent=engine.state.intent,
-        user_name=engine.state.user_name,
+        secondary_node=diag.get("secondary_node"),
+        node_reasoning=diag.get("node_reasoning"),
+        commitment_status=None,
+        turn_count=legacy_engine.state.turn_count,
+        intent=legacy_engine.state.intent,
+        user_name=legacy_engine.state.user_name,
+        last_updated_at=mongo_doc.get("_last_updated"),
     )
 
 
