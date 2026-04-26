@@ -1,4 +1,4 @@
-import { ChatMessage, MessageRole, CrisisLevel } from '@prisma/client';
+import { ChatMessage, MessageRole, CrisisLevel, Prisma } from '@prisma/client';
 import { prisma } from '../../../database';
 
 export interface CreateChatMessageData {
@@ -7,6 +7,20 @@ export interface CreateChatMessageData {
     content: string;
     tokenCount?: number;
     crisisLevel?: CrisisLevel;
+
+    // AI metadata (assistant messages, populated from AI service response)
+    phase?: string | null;
+    energyNode?: string | null;
+    secondaryNode?: string | null;
+    nodeReasoning?: string | null;
+    turnCount?: number | null;
+    solutionStep?: number | null;
+    ragSources?: Prisma.InputJsonValue;
+    detectedEmotion?: string | null;
+
+    // Voice metadata (set on transcribed user messages or synthesized assistant audio)
+    audioUrl?: string | null;
+    durationMs?: number | null;
 }
 
 /**
@@ -20,6 +34,16 @@ async function create(data: CreateChatMessageData): Promise<ChatMessage> {
             content: data.content,
             tokenCount: data.tokenCount ?? null,
             crisisLevel: data.crisisLevel ?? CrisisLevel.NONE,
+            phase: data.phase ?? null,
+            energyNode: data.energyNode ?? null,
+            secondaryNode: data.secondaryNode ?? null,
+            nodeReasoning: data.nodeReasoning ?? null,
+            turnCount: data.turnCount ?? null,
+            solutionStep: data.solutionStep ?? null,
+            ragSources: data.ragSources ?? Prisma.JsonNull,
+            detectedEmotion: data.detectedEmotion ?? null,
+            audioUrl: data.audioUrl ?? null,
+            durationMs: data.durationMs ?? null,
         },
     });
 }

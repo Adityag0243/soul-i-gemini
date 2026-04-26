@@ -1,4 +1,4 @@
-import { ChatMessage, MessageRole, CrisisLevel } from '@prisma/client';
+import { ChatMessage, MessageRole, CrisisLevel, Prisma } from '@prisma/client';
 import { aiServiceConfig } from '../../../config';
 import logger from '../../../core/logger';
 import { InternalError } from '../../../core/api-error';
@@ -48,6 +48,12 @@ interface SouliChatResponse {
     phase: string;
     energy_node: string | null;
     turn_count: number;
+    // Optional fields the AI service may emit. Task 2.7 enriches these on the AI side;
+    // backend reads passthrough so once AI returns them they get persisted automatically.
+    secondary_node?: string | null;
+    node_reasoning?: string | null;
+    solution_step?: number | null;
+    rag_sources?: Prisma.InputJsonValue;
 }
 
 export interface AIResponse {
@@ -58,6 +64,10 @@ export interface AIResponse {
     phase?: string;
     energyNode?: string | null;
     turnCount?: number;
+    secondaryNode?: string | null;
+    nodeReasoning?: string | null;
+    solutionStep?: number | null;
+    ragSources?: Prisma.InputJsonValue;
 }
 
 // system prompt for Souli AI - emotional wellness companion
@@ -468,6 +478,10 @@ export async function generateResponse(
             phase: response.phase,
             energyNode: response.energy_node,
             turnCount: response.turn_count,
+            secondaryNode: response.secondary_node,
+            nodeReasoning: response.node_reasoning,
+            solutionStep: response.solution_step,
+            ragSources: response.rag_sources,
         };
     } catch (error) {
         if (!shouldTryOllamaCompatibilityFallback()) {

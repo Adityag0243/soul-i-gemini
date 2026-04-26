@@ -232,13 +232,22 @@ export async function sendMessage(
         sessionId,
     );
 
-    // save assistant message
+    // save assistant message — persist all AI metadata so we can serve it back
+    // without re-asking AI, and so insights/cron jobs can query on it.
     const assistantMessage = await ChatMessageRepo.create({
         sessionId,
         role: MessageRole.ASSISTANT,
         content: aiResponse.content,
         tokenCount: aiResponse.tokenCount,
         crisisLevel: aiResponse.crisisLevel,
+        phase: aiResponse.phase,
+        energyNode: aiResponse.energyNode,
+        secondaryNode: aiResponse.secondaryNode,
+        nodeReasoning: aiResponse.nodeReasoning,
+        turnCount: aiResponse.turnCount,
+        solutionStep: aiResponse.solutionStep,
+        ragSources: aiResponse.ragSources,
+        detectedEmotion: aiResponse.detectedEmotion,
     });
 
     logger.info('Assistant message saved', {
