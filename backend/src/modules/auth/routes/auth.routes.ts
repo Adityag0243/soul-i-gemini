@@ -583,6 +583,37 @@ registry.registerPath({
     },
 });
 
+registry.registerPath({
+    method: 'get',
+    path: '/auth/sessions',
+    summary: 'List active sessions',
+    description:
+        'List all active keystore sessions for this user. Each entry includes isCurrent flag and optional device metadata.',
+    tags: ['Auth'],
+    security: [{ bearerAuth: [], apiKey: [] }],
+    responses: {
+        200: { description: 'Sessions list retrieved' },
+        401: { description: 'Authentication required' },
+        403: { description: 'Missing or invalid API key' },
+    },
+});
+
+registry.registerPath({
+    method: 'delete',
+    path: '/auth/sessions/{keystoreId}',
+    summary: 'Revoke a specific session',
+    description:
+        'Revoke a specific keystore session by ID. Cannot revoke the current session — use /auth/logout for that.',
+    tags: ['Auth'],
+    security: [{ bearerAuth: [], apiKey: [] }],
+    responses: {
+        200: { description: 'Session revoked' },
+        400: { description: 'Cannot revoke current session' },
+        401: { description: 'Authentication required' },
+        404: { description: 'Session not found' },
+    },
+});
+
 // routes
 
 //register
@@ -674,6 +705,18 @@ router.post(
     '/logout-all',
     authMiddleware as unknown as RequestHandler,
     asyncHandler(AuthController.logoutAll),
+);
+
+router.get(
+    '/sessions',
+    authMiddleware as unknown as RequestHandler,
+    asyncHandler(AuthController.getSessions),
+);
+
+router.delete(
+    '/sessions/:keystoreId',
+    authMiddleware as unknown as RequestHandler,
+    asyncHandler(AuthController.revokeSession),
 );
 
 router.post(

@@ -330,6 +330,27 @@ export async function logoutAll(
     new SuccessResponse('All sessions revoked', { revokedSessions }).send(res);
 }
 
+// list active sessions
+// GET /auth/sessions
+export async function getSessions(
+    req: ProtectedRequest,
+    res: Response,
+): Promise<void> {
+    const result = await AuthService.getSessions(req.user.id, req.keystore.id);
+    new SuccessResponse('Sessions retrieved', result).send(res);
+}
+
+// revoke a specific session
+// DELETE /auth/sessions/:keystoreId
+export async function revokeSession(
+    req: ProtectedRequest,
+    res: Response,
+): Promise<void> {
+    const keystoreId = parseInt(req.params.keystoreId, 10);
+    await AuthService.revokeSession(req.user.id, keystoreId, req.keystore.id);
+    new SuccessResponse('Session revoked', null).send(res);
+}
+
 // send mobile OTP — handles both intent=login (no auth needed) and intent=link
 // (requires Authorization). Optional-auth: tryGetUserIdFromToken returns null
 // when no bearer is present.

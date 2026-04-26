@@ -278,6 +278,12 @@ model Keystore {
   secondaryKey String  @map("secondary_key")
   status       Boolean @default(true)
 
+  deviceName String? @map("device_name")
+  platform   String?
+  appVersion String? @map("app_version")
+  ipAddress  String? @map("ip_address")
+  lastSeenAt DateTime? @map("last_seen_at")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
 

@@ -16,6 +16,7 @@ import {
     BadRequestError,
     AuthFailureError,
     InternalError,
+    NotFoundError,
     TooManyRequestsError,
 } from '../../../core/api-error';
 import { createTokens, validateTokenData } from '../../../core/auth-utils';
@@ -1521,6 +1522,55 @@ export async function eraseAllData(
     };
 }
 
+async function getSessions(userId: number, currentKeystoreId: number) {
+    const keystores = await prisma.keystore.findMany({
+        where: { clientId: userId, status: true },
+        select: {
+            id: true,
+            deviceName: true,
+            platform: true,
+            appVersion: true,
+            ipAddress: true,
+            lastSeenAt: true,
+            createdAt: true,
+        },
+        orderBy: { createdAt: 'desc' },
+    });
+
+    const items = keystores.map((k) => ({
+        id: k.id,
+        isCurrent: k.id === currentKeystoreId,
+        deviceName: k.deviceName,
+        platform: k.platform,
+        appVersion: k.appVersion,
+        ipAddress: k.ipAddress,
+        lastSeenAt: k.lastSeenAt?.toISOString() ?? null,
+        createdAt: k.createdAt.toISOString(),
+    }));
+
+    return { items, total: items.length };
+}
+
+async function revokeSession(
+    userId: number,
+    keystoreId: number,
+    currentKeystoreId: number,
+): Promise<void> {
+    if (keystoreId === currentKeystoreId) {
+        throw new BadRequestError('Cannot revoke current session — use /auth/logout instead');
+    }
+
+    const keystore = await prisma.keystore.findFirst({
+        where: { id: keystoreId, clientId: userId, status: true },
+    });
+
+    if (!keystore) {
+        throw new NotFoundError('Session not found');
+    }
+
+    await prisma.keystore.delete({ where: { id: keystoreId } });
+}
+
 async function logout(keystoreId: number): Promise<void> {
     await prisma.keystore.delete({ where: { id: keystoreId } });
 }
@@ -1554,4 +1604,6 @@ export default {
     eraseAllData,
     logout,
     logoutAll,
+    getSessions,
+    revokeSession,
 };
