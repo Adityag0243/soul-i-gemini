@@ -10,6 +10,7 @@ import {
     cancelSubscriptionSchema,
     getSubscriptionHistorySchema,
     getPaymentHistorySchema,
+    couponRedeemSchema,
 } from '../schemas/payment.schema';
 import * as PaymentController from '../controllers/payment.controller';
 
@@ -254,9 +255,68 @@ router.get(
     asyncHandler(PaymentController.getPaymentHistory),
 );
 
+// ============ Coupon Redeem ============
+
+registry.registerPath({
+    method: 'post',
+    path: '/payments/coupon/redeem',
+    summary: 'Redeem a coupon',
+    description:
+        'Redeem a coupon on the active subscription. For extension_days coupons, extends currentPeriodEnd.',
+    tags: ['Payments - Coupons'],
+    security: [{ bearerAuth: [], apiKey: [] }],
+    request: {
+        body: {
+            content: {
+                'application/json': {
+                    schema: couponRedeemSchema,
+                },
+            },
+        },
+    },
+    responses: {
+        200: { description: 'Coupon redeemed' },
+        400: { description: 'Invalid coupon or no active subscription' },
+        401: { description: 'Authentication required' },
+    },
+});
+
+router.post(
+    '/coupon/redeem',
+    authMiddleware,
+    validator(couponRedeemSchema, ValidationSource.BODY),
+    asyncHandler(PaymentController.redeemCouponCode),
+);
+
 // ============ Webhooks ============
 
 // Stripe webhook (handled separately in webhook routes)
 // Razorpay webhook (handled separately in webhook routes)
 
 export const paymentRoutes = router;
+
+// ============ Coupon Routes (mounted at /coupons) ============
+
+const couponRouter = Router();
+
+registry.registerPath({
+    method: 'get',
+    path: '/coupons/{code}/validate',
+    summary: 'Validate a coupon code',
+    description:
+        'Pre-flight validation — does not redeem. Always returns 200; check `valid` field.',
+    tags: ['Payments - Coupons'],
+    security: [{ bearerAuth: [], apiKey: [] }],
+    responses: {
+        200: { description: 'Validation result' },
+        401: { description: 'Authentication required' },
+    },
+});
+
+couponRouter.get(
+    '/:code/validate',
+    authMiddleware,
+    asyncHandler(PaymentController.validateCouponCode),
+);
+
+export const couponRoutes = couponRouter;

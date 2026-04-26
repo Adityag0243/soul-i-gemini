@@ -748,3 +748,111 @@ class PaymentService {
 
 export const subscriptionService = new SubscriptionService();
 export const paymentService = new PaymentService();
+
+// ============ Coupon Service ============
+
+export async function validateCoupon(code: string, userId: number) {
+    const coupon = await prisma.coupon.findUnique({
+        where: { code: code.toUpperCase() },
+    });
+
+    if (!coupon || !coupon.isActive) {
+        return { valid: false, reason: 'EXPIRED' };
+    }
+
+    const now = new Date();
+    if (now < coupon.validFrom || now > coupon.validUntil) {
+        return { valid: false, reason: 'EXPIRED' };
+    }
+
+    if (coupon.maxRedemptions !== null && coupon.redemptionsCount >= coupon.maxRedemptions) {
+        return { valid: false, reason: 'MAX_REDEMPTIONS_REACHED' };
+    }
+
+    const userRedemptions = await prisma.couponRedemption.count({
+        where: { couponId: coupon.id, userId },
+    });
+    if (userRedemptions >= coupon.perUserLimit) {
+        return { valid: false, reason: 'ALREADY_REDEEMED' };
+    }
+
+    return {
+        valid: true,
+        coupon: {
+            code: coupon.code,
+            discountType: coupon.discountType,
+            discountValue: Number(coupon.discountValue),
+            currency: coupon.currency,
+            validFrom: coupon.validFrom.toISOString(),
+            validUntil: coupon.validUntil.toISOString(),
+            maxRedemptions: coupon.maxRedemptions,
+            redemptionsCount: coupon.redemptionsCount,
+            perUserLimit: coupon.perUserLimit,
+            appliesToPlanIds: coupon.appliesToPlanIds,
+            isActive: coupon.isActive,
+        },
+        discount: {
+            type: coupon.discountType,
+            amount: Number(coupon.discountValue),
+            appliedTo: 'first_invoice',
+        },
+        appliesToCurrentUser: true,
+    };
+}
+
+export async function redeemCoupon(code: string, userId: number) {
+    const validation = await validateCoupon(code, userId);
+    if (!validation.valid) {
+        throw new BadRequestError(`Coupon invalid: ${validation.reason}`);
+    }
+
+    const subscription = await subscriptionRepository.getActiveSubscriptionByUserId(userId);
+    if (!subscription) {
+        throw new BadRequestError('No active subscription to apply coupon to');
+    }
+
+    const coupon = await prisma.coupon.findUniqueOrThrow({
+        where: { code: code.toUpperCase() },
+    });
+
+    const redemption = await prisma.$transaction(async (tx) => {
+        const r = await tx.couponRedemption.create({
+            data: { couponId: coupon.id, userId },
+        });
+
+        await tx.coupon.update({
+            where: { id: coupon.id },
+            data: { redemptionsCount: { increment: 1 } },
+        });
+
+        if (coupon.discountType === 'extension_days' && subscription.currentPeriodEnd) {
+            const newEnd = new Date(subscription.currentPeriodEnd);
+            newEnd.setDate(newEnd.getDate() + Number(coupon.discountValue));
+            await tx.userSubscription.update({
+                where: { id: subscription.id },
+                data: { currentPeriodEnd: newEnd },
+            });
+        }
+
+        return r;
+    });
+
+    const updatedSub = await prisma.userSubscription.findUniqueOrThrow({
+        where: { id: subscription.id },
+        include: { plan: true },
+    });
+
+    return {
+        redemption: {
+            id: redemption.id,
+            code: coupon.code,
+            discount: {
+                type: coupon.discountType,
+                amount: Number(coupon.discountValue),
+            },
+            appliedAt: redemption.redeemedAt.toISOString(),
+            newPeriodEnd: updatedSub.currentPeriodEnd?.toISOString() ?? null,
+        },
+        subscription: updatedSub,
+    };
+}

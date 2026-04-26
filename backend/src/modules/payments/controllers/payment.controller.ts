@@ -7,6 +7,8 @@ import {
 import {
     subscriptionService,
     paymentService,
+    validateCoupon,
+    redeemCoupon,
 } from '../services/payment.service';
 import {
     InitiateCheckoutInput,
@@ -14,6 +16,7 @@ import {
     CancelSubscriptionInput,
     GetSubscriptionHistoryInput,
     GetPaymentHistoryInput,
+    CouponRedeemInput,
 } from '../schemas/payment.schema';
 
 /**
@@ -140,6 +143,32 @@ export async function getPaymentHistory(
     );
 
     new SuccessResponse('Payment history retrieved', history).send(res);
+}
+
+/**
+ * Validate a coupon code (pre-flight, no redemption)
+ * GET /coupons/:code/validate
+ */
+export async function validateCouponCode(
+    req: ProtectedRequest,
+    res: Response,
+): Promise<void> {
+    const code = req.params.code;
+    const result = await validateCoupon(code, req.user.id);
+    new SuccessResponse('Coupon validation result', result).send(res);
+}
+
+/**
+ * Redeem a coupon on the active subscription
+ * POST /payments/coupon/redeem
+ */
+export async function redeemCouponCode(
+    req: ProtectedRequest,
+    res: Response,
+): Promise<void> {
+    const { code } = req.body as CouponRedeemInput;
+    const result = await redeemCoupon(code, req.user.id);
+    new SuccessResponse('Coupon redeemed', result).send(res);
 }
 
 /**

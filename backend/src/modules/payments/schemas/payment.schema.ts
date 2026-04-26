@@ -132,3 +132,15 @@ export const razorpayWebhookSchema = z.object({
 });
 
 export type RazorpayWebhookInput = z.infer<typeof razorpayWebhookSchema>;
+
+// ============ Coupon Schemas ============
+
+export const couponRedeemSchema = z.object({
+    code: z
+        .string()
+        .min(1)
+        .max(50)
+        .transform((v) => v.toUpperCase()),
+});
+
+export type CouponRedeemInput = z.infer<typeof couponRedeemSchema>;
