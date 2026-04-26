@@ -34,10 +34,11 @@ import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from souli_pipeline.storage import mongo_store as _mongo
 
@@ -76,6 +77,42 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ── Internal API Key auth (T2 — Phase 5.1) ──────────────────────────────────
+# All routes except /health require X-Internal-API-Key header matching the
+# INTERNAL_API_KEY env var. When the var is unset the middleware is skipped
+# (dev/local mode); in production it MUST be set.
+
+_INTERNAL_API_KEY = os.environ.get("INTERNAL_API_KEY")
+_AUTH_EXEMPT_PATHS = {"/health", "/docs", "/openapi.json", "/redoc"}
+
+
+class InternalAPIKeyMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        if _INTERNAL_API_KEY is None:
+            return await call_next(request)
+
+        if request.url.path in _AUTH_EXEMPT_PATHS:
+            return await call_next(request)
+
+        key = request.headers.get("x-internal-api-key")
+        if key != _INTERNAL_API_KEY:
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "Invalid or missing X-Internal-API-Key"},
+            )
+
+        request_id = request.headers.get("x-request-id")
+        if request_id:
+            logger.info("req %s %s [request_id=%s]", request.method, request.url.path, request_id)
+
+        response = await call_next(request)
+        if request_id:
+            response.headers["X-Request-Id"] = request_id
+        return response
+
+
+app.add_middleware(InternalAPIKeyMiddleware)
 
 # ── Session store ─────────────────────────────────────────────────────────────
 # Maps session_id (string) → ConversationEngine instance

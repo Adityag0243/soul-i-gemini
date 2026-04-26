@@ -81,6 +81,7 @@ export const aiServiceConfig = {
     model: process.env.AI_MODEL || 'llama3.2',
     maxTokens: parseInt(process.env.AI_MAX_TOKENS || '2048'),
     temperature: parseFloat(process.env.AI_TEMPERATURE || '0.7'),
+    internalApiKey: process.env.AI_INTERNAL_API_KEY || '',
 };
 
 // LiveKit Voice Configuration

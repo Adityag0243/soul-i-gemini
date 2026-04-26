@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { ChatMessage, MessageRole, CrisisLevel, Prisma } from '@prisma/client';
 import { aiServiceConfig } from '../../../config';
 import logger from '../../../core/logger';
@@ -132,6 +133,18 @@ function buildConversationHistory(
 function buildServiceUrl(path: string): string {
     const base = aiServiceConfig.serviceUrl.replace(/\/$/, '');
     return `${base}${path}`;
+}
+
+function internalHeaders(extra?: Record<string, string>): Record<string, string> {
+    const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'X-Request-Id': crypto.randomUUID(),
+        ...extra,
+    };
+    if (aiServiceConfig.internalApiKey) {
+        headers['X-Internal-API-Key'] = aiServiceConfig.internalApiKey;
+    }
+    return headers;
 }
 
 function shouldTryOllamaCompatibilityFallback(): boolean {
@@ -343,9 +356,7 @@ async function callOllamaAPI(
     try {
         const response = await fetch(`${aiServiceConfig.serviceUrl}/api/chat`, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
+            headers: internalHeaders(),
             body: JSON.stringify(requestBody),
         });
 
@@ -401,9 +412,7 @@ export async function getSessionState(
             ),
             {
                 method: 'GET',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
+                headers: internalHeaders(),
             },
         );
 
@@ -444,9 +453,7 @@ async function callSouliChatAPI(
     try {
         const response = await fetch(buildServiceUrl('/chat'), {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
+            headers: internalHeaders(),
             body: JSON.stringify(requestBody),
         });
 
@@ -493,8 +500,14 @@ export async function callSouliVoiceAPI(params: {
         fileName,
     );
 
+    const voiceHeaders: Record<string, string> = {};
+    if (aiServiceConfig.internalApiKey) {
+        voiceHeaders['X-Internal-API-Key'] = aiServiceConfig.internalApiKey;
+    }
+
     const response = await fetch(buildServiceUrl('/voice'), {
         method: 'POST',
+        headers: voiceHeaders,
         body: form,
     });
 
@@ -630,9 +643,7 @@ export async function healthCheck(): Promise<boolean> {
     try {
         const primary = await fetch(`${aiServiceConfig.serviceUrl}/health`, {
             method: 'GET',
-            headers: {
-                'Content-Type': 'application/json',
-            },
+            headers: internalHeaders(),
         });
 
         if (primary.ok) return true;
@@ -643,9 +654,7 @@ export async function healthCheck(): Promise<boolean> {
     try {
         const fallback = await fetch(`${aiServiceConfig.serviceUrl}/api/tags`, {
             method: 'GET',
-            headers: {
-                'Content-Type': 'application/json',
-            },
+            headers: internalHeaders(),
         });
         return fallback.ok;
     } catch {
