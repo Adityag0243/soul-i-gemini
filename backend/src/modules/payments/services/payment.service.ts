@@ -551,7 +551,7 @@ class SubscriptionService {
 
             if (!subscription) {
                 return {
-                    status: 'FREE',
+                    status: 'INACTIVE',
                     isActive: false,
                     remainingDays: 0,
                     willRenew: false,

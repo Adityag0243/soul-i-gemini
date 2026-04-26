@@ -133,7 +133,7 @@ class SubscriptionRepository {
                 where: {
                     userId,
                     status: {
-                        in: ['ACTIVE', 'FREE'],
+                        in: ['ACTIVE', 'TRIALING'],
                     },
                     currentPeriodEnd: {
                         gt: new Date(),
@@ -285,7 +285,7 @@ class SubscriptionRepository {
             const subscription = await prisma.userSubscription.findFirst({
                 where: {
                     userId,
-                    status: 'ACTIVE',
+                    status: { in: ['ACTIVE', 'TRIALING'] },
                     currentPeriodEnd: {
                         gt: new Date(),
                     },

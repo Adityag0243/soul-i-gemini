@@ -46,10 +46,11 @@ enum CrisisLevel {
 }
 
 enum SubscriptionStatus {
-  FREE
   ACTIVE
-  CANCELED
+  INACTIVE
+  TRIALING
   EXPIRED
+  CANCELED
   PAST_DUE
 }
 
@@ -514,7 +515,7 @@ model UserSubscription {
   planId                 String             @map("plan_id") @db.Uuid
   provider               PaymentProvider?
   providerSubscriptionId String?            @map("provider_subscription_id") @db.VarChar(255)
-  status                 SubscriptionStatus @default(FREE)
+  status                 SubscriptionStatus @default(INACTIVE)
   currentPeriodEnd       DateTime?          @map("current_period_end")
 
   createdAt DateTime @default(now()) @map("created_at")
