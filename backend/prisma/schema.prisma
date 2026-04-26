@@ -73,12 +73,12 @@ enum FeedbackType {
 //user and auth
 
 model User {
-  id       Int      @id @default(autoincrement())
+  id       Int     @id @default(autoincrement())
   name     String?
-  email    String?  @unique
+  email    String? @unique
   password String?
-  status   Boolean  @default(true)
-  verified Boolean  @default(false)
+  status   Boolean @default(true)
+  verified Boolean @default(false)
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
@@ -136,21 +136,21 @@ model Role {
 
 // Auth Identities - stores all login providers per user
 model AuthIdentity {
-  id     String       @id @default(uuid()) @db.Uuid
-  userId Int          @map("user_id")
+  id       String       @id @default(uuid()) @db.Uuid
+  userId   Int          @map("user_id")
   provider AuthProvider
 
   // email provider fields
-  email        String?
-  passwordHash String? @map("password_hash")
+  email         String?
+  passwordHash  String? @map("password_hash")
   emailVerified Boolean @default(false) @map("email_verified")
 
   // OAUTH provider fields (Google, Apple)
   providerAccountId String? @map("provider_account_id")
 
   // mobile provider fields (baad mein use karsakte hai)
-  mobileNumber   String?  @map("mobile_number") @db.VarChar(20)
-  mobileVerified Boolean  @default(false) @map("mobile_verified")
+  mobileNumber   String? @map("mobile_number") @db.VarChar(20)
+  mobileVerified Boolean @default(false) @map("mobile_verified")
 
   // anonymous provider fields
   souliKeyHash String? @map("souli_key_hash")
@@ -222,11 +222,11 @@ model ApiKey {
 
 // chat systems
 model ChatSession {
-  id         String   @id @default(uuid()) @db.Uuid
-  userId     Int      @map("user_id")
-  title      String?  @db.VarChar(255)
-  isArchived Boolean  @default(false) @map("is_archived")
-  startedAt  DateTime @default(now()) @map("started_at")
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     Int       @map("user_id")
+  title      String?   @db.VarChar(255)
+  isArchived Boolean   @default(false) @map("is_archived")
+  startedAt  DateTime  @default(now()) @map("started_at")
   endedAt    DateTime? @map("ended_at")
 
   createdAt DateTime @default(now()) @map("created_at")
@@ -248,6 +248,23 @@ model ChatMessage {
   content     String      @db.Text
   tokenCount  Int?        @map("token_count")
   crisisLevel CrisisLevel @default(NONE) @map("crisis_level")
+
+  // AI metadata (set on ASSISTANT messages by chat.service when AI returns a reply).
+  // All nullable: USER messages and pre-existing rows leave them null.
+  // String (not enum) for phase/energyNode/secondaryNode so AI can add values without DB migration.
+  phase           String? @db.VarChar(50)
+  energyNode      String? @map("energy_node") @db.VarChar(50)
+  secondaryNode   String? @map("secondary_node") @db.VarChar(50)
+  nodeReasoning   String? @map("node_reasoning") @db.Text
+  turnCount       Int?    @map("turn_count")
+  solutionStep    Int?    @map("solution_step")
+  ragSources      Json?   @map("rag_sources")
+  detectedEmotion String? @map("detected_emotion") @db.VarChar(100)
+
+  // Voice metadata (set on USER messages that were transcribed from audio,
+  // and on ASSISTANT messages that have synthesized audio).
+  audioUrl   String? @map("audio_url") @db.Text
+  durationMs Int?    @map("duration_ms")
 
   createdAt DateTime @default(now()) @map("created_at")
 
@@ -355,13 +372,13 @@ model PracticeFeedback {
 // SUBSCRIPTIONS
 
 model SubscriptionPlan {
-  id              String  @id @default(uuid()) @db.Uuid
-  name            String  @db.VarChar(100)
-  priceUsd        Decimal @map("price_usd") @db.Decimal(10, 2)
-  stripePriceId   String? @map("stripe_price_id") @db.VarChar(255)
-  razorpayPlanId  String? @map("razorpay_plan_id") @db.VarChar(255)
-  chatLimit       Int?    @map("chat_limit")
-  isActive        Boolean @default(true) @map("is_active")
+  id             String  @id @default(uuid()) @db.Uuid
+  name           String  @db.VarChar(100)
+  priceUsd       Decimal @map("price_usd") @db.Decimal(10, 2)
+  stripePriceId  String? @map("stripe_price_id") @db.VarChar(255)
+  razorpayPlanId String? @map("razorpay_plan_id") @db.VarChar(255)
+  chatLimit      Int?    @map("chat_limit")
+  isActive       Boolean @default(true) @map("is_active")
 
   createdAt DateTime @default(now()) @map("created_at")
 
