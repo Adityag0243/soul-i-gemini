@@ -88,6 +88,11 @@ export const forgotPasswordResetSchema = z
         path: ['confirmPassword'],
     });
 
+// Email verification — confirm step. Send step has no body.
+export const emailVerifyConfirmSchema = z.object({
+    otp: z.string().regex(/^\d{6}$/, 'OTP must be exactly 6 digits'),
+});
+
 // Legacy single-shot reset (kept for 1 release per D7). Combines verify+reset
 // in one body — the controller chains internally so the new 3-step flow is
 // the single source of truth.
@@ -154,6 +159,7 @@ registry.register('ForgotPasswordRequestSchema', forgotPasswordRequestSchema);
 registry.register('ForgotPasswordVerifySchema', forgotPasswordVerifySchema);
 registry.register('ForgotPasswordResetSchema', forgotPasswordResetSchema);
 registry.register('LegacyResetPasswordSchema', legacyResetPasswordSchema);
+registry.register('EmailVerifyConfirmSchema', emailVerifyConfirmSchema);
 registry.register('AuthRequestSchema', authRequestSchema);
 
 export type EmailRegisterInput = z.infer<typeof emailRegisterSchema>;
@@ -176,3 +182,4 @@ export type ForgotPasswordResetInput = z.infer<
 export type LegacyResetPasswordInput = z.infer<
     typeof legacyResetPasswordSchema
 >;
+export type EmailVerifyConfirmInput = z.infer<typeof emailVerifyConfirmSchema>;

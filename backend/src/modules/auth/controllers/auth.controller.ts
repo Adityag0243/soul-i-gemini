@@ -19,6 +19,7 @@ import {
     ForgotPasswordVerifyInput,
     ForgotPasswordResetInput,
     LegacyResetPasswordInput,
+    EmailVerifyConfirmInput,
     ResetJourneyInput,
     EraseAllDataInput,
 } from '../schemas/auth.schema';
@@ -245,4 +246,28 @@ export async function legacyResetPassword(
     });
 
     new SuccessResponse(result.message, null).send(res);
+}
+
+// send email verification OTP
+// POST /auth/email/verify/send
+export async function sendEmailVerificationOtp(
+    req: ProtectedRequest,
+    res: Response,
+): Promise<void> {
+    const result = await AuthService.requestEmailVerificationOtp(req.user.id);
+    new SuccessResponse(result.message, null).send(res);
+}
+
+// confirm email verification OTP
+// POST /auth/email/verify/confirm
+export async function confirmEmailVerification(
+    req: ProtectedRequest,
+    res: Response,
+): Promise<void> {
+    const input = req.body as EmailVerifyConfirmInput;
+    const result = await AuthService.confirmEmailVerification(
+        req.user.id,
+        input,
+    );
+    new SuccessResponse('Email verified', result).send(res);
 }

@@ -6,6 +6,7 @@ enum ResponseStatus {
     UNAUTHORIZED = 401,
     FORBIDDEN = 403,
     NOT_FOUND = 404,
+    TOO_MANY_REQUESTS = 429,
     INTERNAL_ERROR = 500,
     CREATED = 201,
     CONFLICT = 409,
@@ -72,6 +73,24 @@ export class ForbiddenResponse extends ApiResponse {
 export class BadRequestResponse extends ApiResponse {
     constructor(message = 'Bad Parameters', success: boolean = true) {
         super(ResponseStatus.BAD_REQUEST, message, success);
+    }
+}
+
+export class TooManyRequestsResponse extends ApiResponse {
+    constructor(
+        message = 'Too Many Requests',
+        success: boolean = true,
+        private retryAfterSeconds?: number,
+    ) {
+        super(ResponseStatus.TOO_MANY_REQUESTS, message, success);
+    }
+
+    send(res: Response, headers: { [key: string]: string } = {}): Response {
+        const merged = { ...headers };
+        if (this.retryAfterSeconds !== undefined) {
+            merged['Retry-After'] = String(this.retryAfterSeconds);
+        }
+        return super.prepare<TooManyRequestsResponse>(res, this, merged);
     }
 }
 

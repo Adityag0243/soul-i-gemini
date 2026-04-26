@@ -15,6 +15,7 @@ import {
     BadRequestError,
     AuthFailureError,
     InternalError,
+    TooManyRequestsError,
 } from '../../../core/api-error';
 import { createTokens, validateTokenData } from '../../../core/auth-utils';
 import JWT from '../../../core/jwt-utils';
@@ -25,12 +26,17 @@ import stripeGateway from '../../../infrastructure/paymentGateways/stripe.gatewa
 import razorpayGateway from '../../../infrastructure/paymentGateways/razorpay.gateway';
 import logger from '../../../core/logger';
 import { passwordResetEmailService } from '../../../infrastructure/email/password-reset-email.service';
+import { emailVerificationEmailService } from '../../../infrastructure/email/email-verification.service';
 import {
     AuthResponseDto,
     AnonymousAuthResponseDto,
     GoogleUserPayload,
 } from '../dto/auth.dto';
-import { serializeUserForAuth } from '../../users/serializers/user.serializer';
+import { UserDto } from '../../users/dto/user.dto';
+import {
+    serializeUserForAuth,
+    serializeUserById,
+} from '../../users/serializers/user.serializer';
 import {
     EmailRegisterInput,
     EmailLoginInput,
@@ -40,6 +46,7 @@ import {
     ForgotPasswordRequestInput,
     ForgotPasswordVerifyInput,
     ForgotPasswordResetInput,
+    EmailVerifyConfirmInput,
     ResetJourneyInput,
     EraseAllDataInput,
 } from '../schemas/auth.schema';
@@ -93,6 +100,17 @@ const PASSWORD_RESET_SECRET =
     process.env.JWT_PRIVATE_KEY ||
     'souli-password-reset';
 
+// Email verification constants. Rate limit is "3 per hour per userId" per
+// BACKEND_API.md §20; counted via AuthToken rows of EMAIL_VERIFICATION type.
+// Phase 16.8 will swap this for centralized rate-limit middleware.
+const EMAIL_VERIFY_OTP_EXPIRY_MINUTES = 10;
+const EMAIL_VERIFY_RATE_LIMIT_COUNT = 3;
+const EMAIL_VERIFY_RATE_LIMIT_WINDOW_MINUTES = 60;
+const EMAIL_VERIFY_SECRET =
+    process.env.EMAIL_VERIFY_SECRET ||
+    process.env.JWT_PRIVATE_KEY ||
+    'souli-email-verify';
+
 function normalizeEmail(email: string): string {
     return email.trim().toLowerCase();
 }
@@ -114,6 +132,19 @@ function hashResetSessionToken(resetToken: string): string {
 
 function generateResetOtp(): string {
     return crypto.randomInt(100000, 1000000).toString();
+}
+
+function hashEmailVerifyOtp(
+    userId: number,
+    email: string,
+    otp: string,
+): string {
+    return crypto
+        .createHash('sha256')
+        .update(
+            `${EMAIL_VERIFY_SECRET}:verify:${userId}:${normalizeEmail(email)}:${otp}`,
+        )
+        .digest('hex');
 }
 
 function generateResetSessionToken(): string {
@@ -818,6 +849,124 @@ export async function resetPassword(
     };
 }
 
+// Email verification — request OTP. Caller is the authenticated user.
+// Sends a 6-digit code to User.email. 3-per-hour rate limit per userId.
+export async function requestEmailVerificationOtp(
+    userId: number,
+): Promise<{ message: string }> {
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+        throw new AuthFailureError('User not found');
+    }
+
+    if (!user.email) {
+        throw new BadRequestError('No email on file for this account');
+    }
+
+    if (user.verified) {
+        throw new BadRequestError('Email already verified');
+    }
+
+    const windowStart = new Date(
+        Date.now() - EMAIL_VERIFY_RATE_LIMIT_WINDOW_MINUTES * 60 * 1000,
+    );
+    const recentSends = await AuthTokenRepo.countByUserAndTypeSince(
+        userId,
+        TokenType.EMAIL_VERIFICATION,
+        windowStart,
+    );
+    if (recentSends >= EMAIL_VERIFY_RATE_LIMIT_COUNT) {
+        throw new TooManyRequestsError(
+            'Too many verification emails — please wait an hour',
+            EMAIL_VERIFY_RATE_LIMIT_WINDOW_MINUTES * 60,
+        );
+    }
+
+    await AuthTokenRepo.revokeByUserAndType(
+        userId,
+        TokenType.EMAIL_VERIFICATION,
+    );
+
+    const normalizedEmail = normalizeEmail(user.email);
+    const otp = generateResetOtp();
+    const tokenHash = hashEmailVerifyOtp(userId, normalizedEmail, otp);
+    const expiresAt = new Date(
+        Date.now() + EMAIL_VERIFY_OTP_EXPIRY_MINUTES * 60 * 1000,
+    );
+
+    await AuthTokenRepo.create({
+        userId,
+        tokenHash,
+        tokenType: TokenType.EMAIL_VERIFICATION,
+        expiresAt,
+    });
+
+    await emailVerificationEmailService.sendVerificationOtp({
+        email: normalizedEmail,
+        name: user.name || normalizedEmail,
+        otp,
+        expiryMinutes: EMAIL_VERIFY_OTP_EXPIRY_MINUTES,
+    });
+
+    return { message: 'Verification email sent' };
+}
+
+// Email verification — confirm OTP. On success flips User.verified and the
+// EMAIL identity's emailVerified atomically, then returns the fresh user DTO.
+export async function confirmEmailVerification(
+    userId: number,
+    input: EmailVerifyConfirmInput,
+): Promise<{ user: UserDto }> {
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user || !user.email) {
+        throw new AuthFailureError('Invalid or expired OTP');
+    }
+
+    const activeToken = await AuthTokenRepo.findActiveByUserAndType(
+        userId,
+        TokenType.EMAIL_VERIFICATION,
+    );
+    if (!activeToken) {
+        throw new AuthFailureError('Invalid or expired OTP');
+    }
+
+    const expectedHash = hashEmailVerifyOtp(userId, user.email, input.otp);
+    if (activeToken.tokenHash !== expectedHash) {
+        throw new AuthFailureError('Invalid or expired OTP');
+    }
+
+    const normalizedEmail = normalizeEmail(user.email);
+
+    await prisma.$transaction(async (tx) => {
+        await tx.authToken.update({
+            where: { id: activeToken.id },
+            data: { revoked: true },
+        });
+
+        await tx.user.update({
+            where: { id: userId },
+            data: { verified: true },
+        });
+
+        // Mirror onto the EMAIL identity if one exists. Anonymous-only or
+        // OAuth-only accounts may not have an EMAIL identity row.
+        await tx.authIdentity.updateMany({
+            where: {
+                userId,
+                provider: AuthProvider.EMAIL,
+                email: normalizedEmail,
+            },
+            data: { emailVerified: true },
+        });
+    });
+
+    const dto = await serializeUserById(userId);
+    if (!dto) {
+        throw new InternalError('Failed to load user after verification');
+    }
+    return { user: dto };
+}
+
 // restore anonymous session using Souli Key
 
 export async function restoreWithSouliKey(
@@ -997,6 +1146,8 @@ export default {
     requestPasswordResetOtp,
     verifyPasswordResetOtp,
     resetPassword,
+    requestEmailVerificationOtp,
+    confirmEmailVerification,
     restoreWithSouliKey,
     linkGoogleAccount,
     getLinkedProviders,

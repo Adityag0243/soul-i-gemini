@@ -16,6 +16,7 @@ import {
     forgotPasswordVerifySchema,
     forgotPasswordResetSchema,
     legacyResetPasswordSchema,
+    emailVerifyConfirmSchema,
     resetJourneySchema,
     eraseAllDataSchema,
 } from '../schemas/auth.schema';
@@ -379,6 +380,46 @@ registry.registerPath({
     },
 });
 
+registry.registerPath({
+    method: 'post',
+    path: '/auth/email/verify/send',
+    summary: 'Send email verification OTP',
+    description:
+        'Sends a 6-digit verification OTP to User.email. Throttled at 3 sends per hour per userId. Auth required.',
+    tags: ['Auth'],
+    security: [{ bearerAuth: [] }, { apiKey: [] }],
+    responses: {
+        200: { description: 'Verification email sent' },
+        400: { description: 'Email already verified or no email on file' },
+        401: { description: 'Unauthorized' },
+        429: { description: 'Rate limit exceeded' },
+    },
+});
+
+registry.registerPath({
+    method: 'post',
+    path: '/auth/email/verify/confirm',
+    summary: 'Confirm email verification OTP',
+    description:
+        'Confirms the OTP from /auth/email/verify/send and marks the email verified. Returns the updated user.',
+    tags: ['Auth'],
+    security: [{ bearerAuth: [] }, { apiKey: [] }],
+    request: {
+        body: {
+            content: {
+                'application/json': {
+                    schema: emailVerifyConfirmSchema,
+                },
+            },
+        },
+    },
+    responses: {
+        200: { description: 'Email verified' },
+        400: { description: 'Validation error' },
+        401: { description: 'Unauthorized or OTP invalid/expired' },
+    },
+});
+
 // routes
 
 //register
@@ -481,6 +522,20 @@ router.post(
     '/reset-password',
     validator(legacyResetPasswordSchema, ValidationSource.BODY),
     asyncHandler(AuthController.legacyResetPassword),
+);
+
+// Email verification (Phase 4.2)
+router.post(
+    '/email/verify/send',
+    authMiddleware as unknown as RequestHandler,
+    asyncHandler(AuthController.sendEmailVerificationOtp),
+);
+
+router.post(
+    '/email/verify/confirm',
+    authMiddleware as unknown as RequestHandler,
+    validator(emailVerifyConfirmSchema, ValidationSource.BODY),
+    asyncHandler(AuthController.confirmEmailVerification),
 );
 
 export default router;
