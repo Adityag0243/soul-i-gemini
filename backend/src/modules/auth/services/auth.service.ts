@@ -23,6 +23,10 @@ import JWT from '../../../core/jwt-utils';
 import AuthIdentityRepo from '../repositories/auth-identity.repo';
 import AuthTokenRepo from '../repositories/auth-token.repo';
 import MobileOtpRepo from '../repositories/mobile-otp.repo';
+import {
+    verifyAppleIdentityToken,
+    AppleUserPayload,
+} from './apple-token.service';
 import { subscriptionRepository } from '../../../database/repositories/subscription.repo';
 import stripeGateway from '../../../infrastructure/paymentGateways/stripe.gateway';
 import razorpayGateway from '../../../infrastructure/paymentGateways/razorpay.gateway';
@@ -52,6 +56,7 @@ import {
     EmailVerifyConfirmInput,
     MobileOtpSendInput,
     MobileOtpVerifyInput,
+    AppleLoginInput,
     ResetJourneyInput,
     EraseAllDataInput,
 } from '../schemas/auth.schema';
@@ -600,6 +605,83 @@ export async function loginWithGoogle(
             email: googleUser.email,
             emailVerified: googleUser.email_verified ?? false,
             providerAccountId: googleUser.sub,
+        });
+    }
+
+    const tokens = await createTokens(
+        user,
+        keystore.primaryKey,
+        keystore.secondaryKey,
+    );
+
+    return {
+        user: await serializeUserForAuth(user),
+        tokens,
+    };
+}
+
+// Sign in with Apple. Verifies the identity token against Apple's JWKs, then
+// either logs in an existing user (matched by Apple sub) or registers a new
+// one. Apple only sends `email` on first authorization, so on existing logins
+// the user is found by sub regardless of whether email is present. fullName
+// also only arrives on first authorization — persisted to User on registration.
+export async function loginWithApple(
+    input: AppleLoginInput,
+): Promise<AuthResponseDto> {
+    const appleUser: AppleUserPayload = await verifyAppleIdentityToken(
+        input.identityToken,
+        { nonce: input.nonce },
+    );
+
+    let identity = await AuthIdentityRepo.findByProviderAndAccountId(
+        AuthProvider.APPLE,
+        appleUser.sub,
+    );
+
+    let user: User & { roles: { role: { id: number; code: RoleCode } }[] };
+    let keystore: { primaryKey: string; secondaryKey: string };
+
+    if (identity) {
+        const existingUser = await prisma.user.findUnique({
+            where: { id: identity.userId },
+            include: {
+                roles: {
+                    include: {
+                        role: { select: { id: true, code: true } },
+                    },
+                },
+            },
+        });
+        if (!existingUser || !existingUser.status) {
+            throw new AuthFailureError('User account is disabled');
+        }
+        user = existingUser;
+        keystore = await createSession(user.id);
+    } else {
+        // First-time Apple login. Build a display name from fullName if Apple
+        // sent it (only on this very first authorization for this app).
+        const displayName = [
+            input.fullName?.givenName,
+            input.fullName?.familyName,
+        ]
+            .filter((p) => p && p.trim().length > 0)
+            .join(' ')
+            .trim();
+
+        const result = await createUserWithSession({
+            name: displayName.length > 0 ? displayName : undefined,
+            email: appleUser.email,
+            verified: appleUser.emailVerified,
+        });
+        user = result.user;
+        keystore = result.keystore;
+
+        await AuthIdentityRepo.create({
+            userId: user.id,
+            provider: AuthProvider.APPLE,
+            email: appleUser.email,
+            emailVerified: appleUser.emailVerified,
+            providerAccountId: appleUser.sub,
         });
     }
 
@@ -1342,6 +1424,47 @@ export async function linkGoogleAccount(
     });
 }
 
+// link Apple account to existing user. Mirrors linkGoogleAccount.
+export async function linkAppleAccount(
+    userId: number,
+    input: AppleLoginInput,
+): Promise<void> {
+    const appleUser = await verifyAppleIdentityToken(input.identityToken, {
+        nonce: input.nonce,
+    });
+
+    const existingIdentity = await AuthIdentityRepo.findByProviderAndAccountId(
+        AuthProvider.APPLE,
+        appleUser.sub,
+    );
+
+    if (existingIdentity) {
+        if (existingIdentity.userId === userId) {
+            throw new BadRequestError(
+                'Apple account is already linked to your account',
+            );
+        }
+        throw new BadRequestError(
+            'Apple account is already linked to another user',
+        );
+    }
+
+    const hasApple = await AuthIdentityRepo.hasProvider(
+        userId,
+        AuthProvider.APPLE,
+    );
+    if (hasApple) {
+        throw new BadRequestError('You already have an Apple account linked');
+    }
+
+    await AuthIdentityRepo.linkProvider(userId, {
+        provider: AuthProvider.APPLE,
+        email: appleUser.email,
+        emailVerified: appleUser.emailVerified,
+        providerAccountId: appleUser.sub,
+    });
+}
+
 // get linked providers for a user
 export async function getLinkedProviders(userId: number) {
     const identities = await AuthIdentityRepo.findByUserId(userId);
@@ -1411,8 +1534,10 @@ export default {
     confirmEmailVerification,
     sendMobileOtp,
     verifyMobileOtp,
+    loginWithApple,
     restoreWithSouliKey,
     linkGoogleAccount,
+    linkAppleAccount,
     getLinkedProviders,
     resetJourney,
     eraseAllData,

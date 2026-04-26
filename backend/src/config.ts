@@ -65,6 +65,16 @@ export const googleConfig = {
     callbackUrl: process.env.CALLBACK_URL || '',
 };
 
+// Sign in with Apple configuration. The identity-token verifier checks that
+// `aud` matches one of the allowed audiences. APPLE_BUNDLE_ID is the iOS bundle
+// id (mobile native flow); APPLE_SERVICE_ID is the Service ID for the web flow,
+// optional. Q8 (Apple Developer team access) is required to obtain these — the
+// verifier hard-fails when neither is set.
+export const appleConfig = {
+    bundleId: process.env.APPLE_BUNDLE_ID || '',
+    serviceId: process.env.APPLE_SERVICE_ID || '',
+};
+
 // AI Service Configuration (GCP Ollama)
 export const aiServiceConfig = {
     serviceUrl: process.env.AI_SERVICE_URL || 'http://localhost:11434',

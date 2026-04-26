@@ -26,6 +26,7 @@ import {
     EmailVerifyConfirmInput,
     MobileOtpSendInput,
     MobileOtpVerifyInput,
+    AppleLoginInput,
     ResetJourneyInput,
     EraseAllDataInput,
 } from '../schemas/auth.schema';
@@ -78,6 +79,22 @@ export async function googleLogin(
     setCookies(res, result.tokens);
 
     new SuccessResponse('Google login successful', {
+        user: result.user,
+        tokens: result.tokens,
+    }).send(res);
+}
+
+// sign in with Apple
+// POST /auth/apple
+export async function appleLogin(
+    req: Request<object, object, AppleLoginInput>,
+    res: Response,
+): Promise<void> {
+    const result = await AuthService.loginWithApple(req.body);
+
+    setCookies(res, result.tokens);
+
+    new SuccessResponse('Apple login successful', {
         user: result.user,
         tokens: result.tokens,
     }).send(res);
@@ -155,6 +172,19 @@ export async function linkGoogle(
     await AuthService.linkGoogleAccount(req.user.id, idToken);
 
     new SuccessResponse('Google account linked successfully', null).send(res);
+}
+
+// link Apple account to current user
+// POST /auth/link/apple
+export async function linkApple(
+    req: ProtectedRequest,
+    res: Response,
+): Promise<void> {
+    const input = req.body as AppleLoginInput;
+
+    await AuthService.linkAppleAccount(req.user.id, input);
+
+    new SuccessResponse('Apple account linked successfully', null).send(res);
 }
 
 // get linked providers for current user

@@ -8,6 +8,7 @@ import {
     emailRegisterSchema,
     emailLoginSchema,
     googleLoginSchema,
+    appleLoginSchema,
     anonymousLoginSchema,
     authRequestSchema,
     refreshTokenSchema,
@@ -134,6 +135,31 @@ registry.registerPath({
 
 registry.registerPath({
     method: 'post',
+    path: '/auth/apple',
+    summary: 'Login/Register with Apple',
+    description:
+        'Authenticate using an Apple identity token. Verified against Apple JWKs. fullName is only sent on first authorization (Apple contract). Returns user + JWT tokens.',
+    tags: ['Auth'],
+    security: [{ apiKey: [] }],
+    request: {
+        body: {
+            content: {
+                'application/json': {
+                    schema: appleLoginSchema,
+                },
+            },
+        },
+    },
+    responses: {
+        200: { description: 'Login successful' },
+        400: { description: 'Apple nonce mismatch or validation error' },
+        401: { description: 'Invalid Apple identity token' },
+        403: { description: 'Missing or invalid API key' },
+    },
+});
+
+registry.registerPath({
+    method: 'post',
     path: '/auth/anonymous',
     summary: 'Anonymous Login',
     description:
@@ -192,6 +218,31 @@ registry.registerPath({
         400: { description: 'Account already linked' },
         401: { description: 'Invalid credentials' },
         403: { description: 'Missing or invalid API key' },
+    },
+});
+
+registry.registerPath({
+    method: 'post',
+    path: '/auth/link/apple',
+    summary: 'Link Apple Account',
+    description:
+        'Link an Apple account to the current user. Same body as /auth/apple. Requires authentication.',
+    tags: ['Auth'],
+    security: [{ apiKey: [], bearerAuth: [] }],
+    request: {
+        body: {
+            content: {
+                'application/json': {
+                    schema: appleLoginSchema,
+                },
+            },
+        },
+    },
+    responses: {
+        200: { description: 'Apple account linked successfully' },
+        400: { description: 'Account already linked or nonce mismatch' },
+        401: { description: 'Invalid Apple identity token' },
+        409: { description: 'Apple account belongs to another user' },
     },
 });
 
@@ -495,6 +546,13 @@ router.post(
     asyncHandler(AuthController.googleLogin),
 );
 
+// apple login/register
+router.post(
+    '/apple',
+    validator(appleLoginSchema, ValidationSource.BODY),
+    asyncHandler(AuthController.appleLogin),
+);
+
 // anonymous login
 router.post(
     '/anonymous',
@@ -523,6 +581,13 @@ router.post(
     authMiddleware as unknown as RequestHandler,
     validator(googleLoginSchema, ValidationSource.BODY),
     asyncHandler(AuthController.linkGoogle),
+);
+
+router.post(
+    '/link/apple',
+    authMiddleware as unknown as RequestHandler,
+    validator(appleLoginSchema, ValidationSource.BODY),
+    asyncHandler(AuthController.linkApple),
 );
 
 router.get(

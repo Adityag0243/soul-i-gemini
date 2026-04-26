@@ -31,6 +31,22 @@ export const googleLoginSchema = z.object({
     idToken: z.string().min(1, 'Google ID token is required'),
 });
 
+// Apple Login Schema. fullName is only sent on first authorization (Apple's
+// contract); subsequent logins omit it. authorizationCode is accepted for
+// forward-compat with future server-to-server token validation but currently
+// unused by the verifier.
+export const appleLoginSchema = z.object({
+    identityToken: z.string().min(1, 'Apple identity token is required'),
+    authorizationCode: z.string().optional(),
+    fullName: z
+        .object({
+            givenName: z.string().optional(),
+            familyName: z.string().optional(),
+        })
+        .optional(),
+    nonce: z.string().optional(),
+});
+
 // Anonymous Login Schema
 export const anonymousLoginSchema = z.object({
     name: z.string().max(255).optional(),
@@ -165,6 +181,7 @@ export const refreshTokenSchema = z
 registry.register('EmailRegisterSchema', emailRegisterSchema);
 registry.register('EmailLoginSchema', emailLoginSchema);
 registry.register('GoogleLoginSchema', googleLoginSchema);
+registry.register('AppleLoginSchema', appleLoginSchema);
 registry.register('AnonymousLoginSchema', anonymousLoginSchema);
 registry.register('SouliKeyRestoreSchema', souliKeyRestoreSchema);
 registry.register('ResetJourneySchema', resetJourneySchema);
@@ -181,6 +198,7 @@ registry.register('AuthRequestSchema', authRequestSchema);
 export type EmailRegisterInput = z.infer<typeof emailRegisterSchema>;
 export type EmailLoginInput = z.infer<typeof emailLoginSchema>;
 export type GoogleLoginInput = z.infer<typeof googleLoginSchema>;
+export type AppleLoginInput = z.infer<typeof appleLoginSchema>;
 export type AnonymousLoginInput = z.infer<typeof anonymousLoginSchema>;
 export type SouliKeyRestoreInput = z.infer<typeof souliKeyRestoreSchema>;
 export type ResetJourneyInput = z.infer<typeof resetJourneySchema>;
