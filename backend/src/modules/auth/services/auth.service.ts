@@ -29,8 +29,8 @@ import {
     AuthResponseDto,
     AnonymousAuthResponseDto,
     GoogleUserPayload,
-    UserDataDto,
 } from '../dto/auth.dto';
+import { serializeUserForAuth } from '../../users/serializers/user.serializer';
 import {
     EmailRegisterInput,
     EmailLoginInput,
@@ -259,23 +259,9 @@ async function verifyGoogleToken(idToken: string): Promise<GoogleUserPayload> {
     }
 }
 
-// transform user to UserDataDto
-
-function toUserData(
-    user: User & { roles?: { role: { id: number; code: RoleCode } }[] },
-): UserDataDto {
-    return {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        verified: user.verified,
-        roles:
-            user.roles?.map((ur) => ({
-                id: ur.role.id,
-                code: ur.role.code,
-            })) || [],
-    };
-}
+// User serialization is centralized in modules/users/serializers/user.serializer
+// — call serializeUserForAuth(user) which loads identities and builds the
+// canonical UserDto (D3) so every auth response shares one shape.
 
 // create user with role and keystore in a transaction
 
@@ -429,7 +415,7 @@ export async function registerWithEmail(
     );
 
     return {
-        user: toUserData(user),
+        user: await serializeUserForAuth(user),
         tokens,
     };
 }
@@ -490,7 +476,7 @@ export async function loginWithEmail(
     );
 
     return {
-        user: toUserData(user),
+        user: await serializeUserForAuth(user),
         tokens,
     };
 }
@@ -563,7 +549,7 @@ export async function loginWithGoogle(
     );
 
     return {
-        user: toUserData(user),
+        user: await serializeUserForAuth(user),
         tokens,
     };
 }
@@ -597,7 +583,7 @@ export async function loginAnonymous(
     );
 
     return {
-        user: toUserData(user),
+        user: await serializeUserForAuth(user),
         tokens,
         souliKey, // Return only once - user must save this!
     };
@@ -898,7 +884,7 @@ export async function restoreWithSouliKey(
     );
 
     return {
-        user: toUserData(user),
+        user: await serializeUserForAuth(user),
         tokens,
     };
 }

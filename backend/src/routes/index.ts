@@ -4,6 +4,7 @@ import { apiKeyMiddleware } from '../middlewares/api-key.middleware';
 import permission from '../middlewares/permission.middleware';
 import { authRoutes as authModuleRoutes } from '../modules/auth';
 import { chatRoutes } from '../modules/chat';
+import { usersRoutes } from '../modules/users';
 import { voiceRoutes } from '../modules/voice';
 import { paymentRoutes } from '../modules/payments/routes/payment.routes';
 import { Permission } from '@prisma/client';
@@ -22,6 +23,8 @@ router.use(permission(Permission.GENERAL) as RequestHandler);
 
 // modular auth routes
 router.use('/auth', authModuleRoutes);
+
+router.use('/users', usersRoutes);
 
 router.use('/chat', chatRoutes);
 
