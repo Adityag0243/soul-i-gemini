@@ -5,7 +5,7 @@ import { ValidationSource } from '../../../helpers/validator';
 import authMiddleware from '../../../middlewares/auth.middleware';
 import { registry } from '../../../swagger-docs/swagger';
 import * as UsersController from '../controllers/users.controller';
-import { updateMeSchema } from '../schemas/users.schema';
+import { setCallNameSchema, updateMeSchema } from '../schemas/users.schema';
 
 const router = Router();
 
@@ -49,12 +49,42 @@ registry.registerPath({
     },
 });
 
+registry.registerPath({
+    method: 'post',
+    path: '/users/me/call-name',
+    summary: 'Set Call Name (Onboarding)',
+    description:
+        'Onboarding-only setter for callName. Also flips onboardingCompleted=true so the client can transition out of onboarding atomically.',
+    tags: ['Users'],
+    security: [{ apiKey: [], bearerAuth: [] }],
+    request: {
+        body: {
+            content: {
+                'application/json': {
+                    schema: setCallNameSchema,
+                },
+            },
+        },
+    },
+    responses: {
+        200: { description: 'Call name set' },
+        400: { description: 'Validation error' },
+        401: { description: 'Authentication required' },
+    },
+});
+
 router.get('/me', asyncHandler(UsersController.getMe));
 
 router.patch(
     '/me',
     validator(updateMeSchema, ValidationSource.BODY),
     asyncHandler(UsersController.updateMe),
+);
+
+router.post(
+    '/me/call-name',
+    validator(setCallNameSchema, ValidationSource.BODY),
+    asyncHandler(UsersController.setCallName),
 );
 
 export default router;

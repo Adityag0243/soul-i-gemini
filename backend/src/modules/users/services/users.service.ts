@@ -3,7 +3,7 @@ import { prisma } from '../../../database';
 import { BadRequestError, NotFoundError } from '../../../core/api-error';
 import { UserDto } from '../dto/user.dto';
 import { serializeUserById } from '../serializers/user.serializer';
-import { UpdateMeInput } from '../schemas/users.schema';
+import { SetCallNameInput, UpdateMeInput } from '../schemas/users.schema';
 
 const MIN_AGE_YEARS = 13;
 
@@ -71,6 +71,29 @@ export async function updateMe(
     return dto;
 }
 
+// Onboarding-only setter — same effect as PATCH { callName, onboardingCompleted: true }
+// but exists as its own endpoint so the mobile onboarding flow has a clear hit
+// and analytics can attribute "completed onboarding" cleanly.
+export async function setCallName(
+    userId: number,
+    input: SetCallNameInput,
+): Promise<UserDto> {
+    await prisma.user.update({
+        where: { id: userId },
+        data: {
+            callName: input.callName,
+            onboardingCompleted: true,
+        },
+    });
+
+    const dto = await serializeUserById(userId);
+    if (!dto) {
+        throw new NotFoundError('User not found');
+    }
+    return dto;
+}
+
 export default {
     updateMe,
+    setCallName,
 };

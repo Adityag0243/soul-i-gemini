@@ -41,3 +41,13 @@ export const updateMeSchema = z
 registry.register('UpdateMeSchema', updateMeSchema);
 
 export type UpdateMeInput = z.infer<typeof updateMeSchema>;
+
+// Onboarding-only call-name setter (BACKEND_API.md §5.4). Same length bounds
+// as updateMeSchema.callName so they stay in sync.
+export const setCallNameSchema = z.object({
+    callName: z.string().trim().min(1).max(50),
+});
+
+registry.register('SetCallNameSchema', setCallNameSchema);
+
+export type SetCallNameInput = z.infer<typeof setCallNameSchema>;
