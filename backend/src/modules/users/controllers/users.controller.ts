@@ -50,3 +50,12 @@ export async function uploadAvatar(
     const result = await UsersService.uploadAvatar(req.user.id, req.file);
     new SuccessResponse('Avatar updated', result).send(res);
 }
+
+// DELETE /users/me/avatar
+export async function deleteAvatar(
+    req: ProtectedRequest,
+    res: Response,
+): Promise<void> {
+    const user = await UsersService.deleteAvatar(req.user.id);
+    new SuccessResponse('Avatar removed', user).send(res);
+}

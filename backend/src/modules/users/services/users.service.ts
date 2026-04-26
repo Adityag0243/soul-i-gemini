@@ -161,8 +161,23 @@ export async function uploadAvatar(
     return { avatar: avatarUrl, avatarThumb: avatarThumbUrl, user: dto };
 }
 
+// Clear the user's avatar pointer. The S3 objects are intentionally retained
+// (BACKEND_API.md §5.6) — a 30-day lifecycle rule sweeps them so accidental
+// deletes can be audited / recovered in the meantime.
+export async function deleteAvatar(userId: number): Promise<UserDto> {
+    await prisma.user.update({
+        where: { id: userId },
+        data: { avatarUrl: null },
+    });
+
+    const dto = await serializeUserById(userId);
+    if (!dto) throw new NotFoundError('User not found');
+    return dto;
+}
+
 export default {
     updateMe,
     setCallName,
     uploadAvatar,
+    deleteAvatar,
 };

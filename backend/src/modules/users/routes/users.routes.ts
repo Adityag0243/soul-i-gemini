@@ -124,4 +124,20 @@ router.post(
     asyncHandler(UsersController.uploadAvatar),
 );
 
+registry.registerPath({
+    method: 'delete',
+    path: '/users/me/avatar',
+    summary: 'Remove Avatar',
+    description:
+        'Clear the user\'s avatar pointer. Underlying S3 objects are retained for audit; a lifecycle rule sweeps them after 30 days.',
+    tags: ['Users'],
+    security: [{ apiKey: [], bearerAuth: [] }],
+    responses: {
+        200: { description: 'Avatar removed' },
+        401: { description: 'Authentication required' },
+    },
+});
+
+router.delete('/me/avatar', asyncHandler(UsersController.deleteAvatar));
+
 export default router;
