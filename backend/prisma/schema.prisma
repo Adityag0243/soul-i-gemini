@@ -229,6 +229,32 @@ model ChatSession {
   startedAt  DateTime  @default(now()) @map("started_at")
   endedAt    DateTime? @map("ended_at")
 
+  // AI session-level state (mirrored from latest assistant message; updated by chat.service on every AI reply).
+  phase            String? @db.VarChar(50)
+  energyNode       String? @map("energy_node") @db.VarChar(50)
+  secondaryNode    String? @map("secondary_node") @db.VarChar(50)
+  commitmentStatus String? @map("commitment_status") @db.VarChar(50)
+  solutionStep     Int?    @map("solution_step")
+  solutionComplete Boolean @default(false) @map("solution_complete")
+
+  // Three-day task assigned by AI when solution_complete fires (Phase 13 webhook).
+  // JSON blob shape: { title, description, durationDays, ... } — kept flexible to track AI changes.
+  threeDayTask           Json?     @map("three_day_task")
+  threeDayTaskAssignedAt DateTime? @map("three_day_task_assigned_at")
+
+  // Activity tracking (used by Phase 9 cron auto-archive, Phase 11 insights).
+  lastActivityAt DateTime? @map("last_activity_at")
+
+  // Voice channel metadata. v1 is upload-based (D8); livekitRoomName is reserved for v1.1+.
+  channelType     String? @map("channel_type") @db.VarChar(20)
+  livekitRoomName String? @map("livekit_room_name") @db.VarChar(255)
+
+  // Aggregates and free-tier signals.
+  totalTokensUsed Int     @default(0) @map("total_tokens_used")
+  mood            String? @db.VarChar(50)
+  // Set true when user sends 3rd user message in this session (D12). Increments User.freeSessionsCompleted.
+  isComplete      Boolean @default(false) @map("is_complete")
+
   createdAt DateTime @default(now()) @map("created_at")
 
   user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
