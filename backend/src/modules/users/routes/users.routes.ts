@@ -3,6 +3,7 @@ import { asyncHandler } from '../../../core/async-handler';
 import { validator } from '../../../middlewares/validator.middleware';
 import { ValidationSource } from '../../../helpers/validator';
 import authMiddleware from '../../../middlewares/auth.middleware';
+import { avatarUpload } from '../../../middlewares/upload.middleware';
 import { registry } from '../../../swagger-docs/swagger';
 import * as UsersController from '../controllers/users.controller';
 import { setCallNameSchema, updateMeSchema } from '../schemas/users.schema';
@@ -85,6 +86,42 @@ router.post(
     '/me/call-name',
     validator(setCallNameSchema, ValidationSource.BODY),
     asyncHandler(UsersController.setCallName),
+);
+
+registry.registerPath({
+    method: 'post',
+    path: '/users/me/avatar',
+    summary: 'Upload Avatar',
+    description:
+        'Multipart upload of a single image file in field "file". Max 5 MB; image/jpeg|png|webp. Backend resizes to 256×256 + 64×64 (WebP) and uploads both to S3.',
+    tags: ['Users'],
+    security: [{ apiKey: [], bearerAuth: [] }],
+    request: {
+        body: {
+            content: {
+                'multipart/form-data': {
+                    schema: {
+                        type: 'object',
+                        properties: {
+                            file: { type: 'string', format: 'binary' },
+                        },
+                        required: ['file'],
+                    },
+                },
+            },
+        },
+    },
+    responses: {
+        200: { description: 'Avatar updated' },
+        400: { description: 'Missing file, oversize, or unsupported MIME' },
+        401: { description: 'Authentication required' },
+    },
+});
+
+router.post(
+    '/me/avatar',
+    avatarUpload,
+    asyncHandler(UsersController.uploadAvatar),
 );
 
 export default router;

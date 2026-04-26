@@ -1,6 +1,6 @@
 import { Response } from 'express';
 import { SuccessResponse } from '../../../core/api-response';
-import { InternalError } from '../../../core/api-error';
+import { BadRequestError, InternalError } from '../../../core/api-error';
 import { ProtectedRequest } from '../../../types/app-requests';
 import { serializeUserById } from '../serializers/user.serializer';
 import UsersService from '../services/users.service';
@@ -37,4 +37,16 @@ export async function setCallName(
     const input = req.body as SetCallNameInput;
     const user = await UsersService.setCallName(req.user.id, input);
     new SuccessResponse('Call name set', user).send(res);
+}
+
+// POST /users/me/avatar
+export async function uploadAvatar(
+    req: ProtectedRequest,
+    res: Response,
+): Promise<void> {
+    if (!req.file) {
+        throw new BadRequestError('Avatar file is required (field "file")');
+    }
+    const result = await UsersService.uploadAvatar(req.user.id, req.file);
+    new SuccessResponse('Avatar updated', result).send(res);
 }

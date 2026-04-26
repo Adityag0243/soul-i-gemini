@@ -113,9 +113,14 @@ export const paymentConfig = {
     ),
 };
 
-// configure SES for export (backward compatibility)
+// S3 / CDN configuration (avatars, voice audio, practice media). Bucket and
+// CDN base URL are provisioned by Phase 16.1; the endpoint code throws a
+// clear runtime error if AWS credentials/bucket are missing.
 export const configS3 = {
     awsRegion: process.env.AWS_REGION || 'ap-south-1',
     awsAccessKeyId: process.env.AWS_ACCESS_KEY_ID || '',
     awsSecretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || '',
+    bucket: process.env.S3_BUCKET || '',
+    // No trailing slash. Falls back to direct S3 URL if no CDN configured.
+    cdnBaseUrl: (process.env.CDN_BASE_URL || '').replace(/\/$/, ''),
 };

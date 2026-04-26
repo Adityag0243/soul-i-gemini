@@ -1,6 +1,10 @@
+import crypto from 'crypto';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../../database';
 import { BadRequestError, NotFoundError } from '../../../core/api-error';
+import logger from '../../../core/logger';
+import { processAvatar } from '../../../infrastructure/images/avatar-processor';
+import s3Gateway from '../../../infrastructure/storage/s3.gateway';
 import { UserDto } from '../dto/user.dto';
 import { serializeUserById } from '../serializers/user.serializer';
 import { SetCallNameInput, UpdateMeInput } from '../schemas/users.schema';
@@ -93,7 +97,72 @@ export async function setCallName(
     return dto;
 }
 
+export interface UploadAvatarResult {
+    avatar: string;
+    avatarThumb: string;
+    user: UserDto;
+}
+
+// Resize the upload to 256×256 + 64×64 thumbnail (WebP), upload both to S3,
+// update User.avatarUrl, and return both URLs + the freshly serialized user.
+export async function uploadAvatar(
+    userId: number,
+    file: Express.Multer.File,
+): Promise<UploadAvatarResult> {
+    const { full, thumb, contentType } = await processAvatar(file.buffer);
+
+    // Random suffix prevents browser/CDN caching the previous avatar at the
+    // same URL after a re-upload, and avoids collisions if cleanup races.
+    const slug = crypto.randomBytes(8).toString('hex');
+    const fullKey = `avatars/${userId}/${slug}.webp`;
+    const thumbKey = `avatars/${userId}/${slug}_thumb.webp`;
+
+    const [avatarUrl, avatarThumbUrl] = await Promise.all([
+        s3Gateway.putObject({
+            key: fullKey,
+            body: full,
+            contentType,
+        }),
+        s3Gateway.putObject({
+            key: thumbKey,
+            body: thumb,
+            contentType,
+        }),
+    ]);
+
+    const previous = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { avatarUrl: true },
+    });
+
+    await prisma.user.update({
+        where: { id: userId },
+        data: { avatarUrl },
+    });
+
+    // Best-effort cleanup of the previous full + thumb objects. Done after the
+    // DB update so a delete failure can't orphan the new avatar.
+    if (previous?.avatarUrl) {
+        const previousThumb = previous.avatarUrl.replace(
+            /\.webp$/,
+            '_thumb.webp',
+        );
+        await Promise.all([
+            s3Gateway.deleteByUrl(previous.avatarUrl),
+            s3Gateway.deleteByUrl(previousThumb),
+        ]).catch((error) =>
+            logger.warn('Avatar cleanup partial failure', { userId, error }),
+        );
+    }
+
+    const dto = await serializeUserById(userId);
+    if (!dto) throw new NotFoundError('User not found');
+
+    return { avatar: avatarUrl, avatarThumb: avatarThumbUrl, user: dto };
+}
+
 export default {
     updateMe,
     setCallName,
+    uploadAvatar,
 };
