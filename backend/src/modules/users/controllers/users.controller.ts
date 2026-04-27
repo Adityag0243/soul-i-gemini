@@ -4,6 +4,7 @@ import { BadRequestError, InternalError } from '../../../core/api-error';
 import { ProtectedRequest } from '../../../types/app-requests';
 import { serializeUserById } from '../serializers/user.serializer';
 import UsersService from '../services/users.service';
+import * as insightsService from '../services/insights.service';
 import { SetCallNameInput, UpdateMeInput } from '../schemas/users.schema';
 
 // GET /users/me
@@ -58,4 +59,14 @@ export async function deleteAvatar(
 ): Promise<void> {
     const user = await UsersService.deleteAvatar(req.user.id);
     new SuccessResponse('Avatar removed', user).send(res);
+}
+
+// GET /users/me/insights
+export async function getInsights(
+    req: ProtectedRequest,
+    res: Response,
+): Promise<void> {
+    const range = (req.query.range as string) || '30d';
+    const result = await insightsService.getInsights(req.user.id, range);
+    new SuccessResponse('Insights retrieved', result).send(res);
 }

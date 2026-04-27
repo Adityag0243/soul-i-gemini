@@ -141,6 +141,35 @@ registry.registerPath({
 
 router.delete('/me/avatar', asyncHandler(UsersController.deleteAvatar));
 
+// ============ Insights ============
+
+registry.registerPath({
+    method: 'get',
+    path: '/users/me/insights',
+    summary: 'Get User Insights',
+    description:
+        'Aggregated insights: sessions, messages, voice minutes, check-in streak, mood trend, energy node frequency, crisis events, practices completed, top themes.',
+    tags: ['Users - Insights'],
+    security: [{ bearerAuth: [] }],
+    parameters: [
+        {
+            name: 'range',
+            in: 'query',
+            schema: { type: 'string', default: '30d', enum: ['7d', '30d', '90d', 'all'] },
+            description: 'Time range for aggregation',
+        },
+    ],
+    responses: {
+        200: { description: 'Insights retrieved' },
+        401: { description: 'Unauthorized' },
+    },
+});
+
+router.get(
+    '/me/insights',
+    asyncHandler(UsersController.getInsights),
+);
+
 // ============ Saved Practices ============
 
 registry.registerPath({

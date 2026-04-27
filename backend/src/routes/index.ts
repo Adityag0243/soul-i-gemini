@@ -10,6 +10,7 @@ import { voiceRoutes } from '../modules/voice';
 import { paymentRoutes, couponRoutes } from '../modules/payments/routes/payment.routes';
 import { checkinRoutes } from '../modules/checkins';
 import { energyNodeRoutes, practiceRoutes, assignmentRoutes } from '../modules/practices';
+import { referralRoutes } from '../modules/referrals';
 import { Permission } from '@prisma/client';
 
 const router = Router();
@@ -46,5 +47,7 @@ router.use('/energy-nodes', energyNodeRoutes);
 router.use('/practices', practiceRoutes);
 
 router.use('/practice-assignments', assignmentRoutes);
+
+router.use('/referrals', referralRoutes);
 
 export default router;
