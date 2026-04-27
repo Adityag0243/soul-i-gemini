@@ -287,29 +287,9 @@ export async function getFreeSessionStatus(
     req: ProtectedRequest,
     res: Response,
 ): Promise<void> {
-    const status = await ChatService.getFreeSessionStatus(req.user.id);
+    const status = await ChatService.getFreeTierStatus(req.user.id);
 
     new SuccessResponse('Free session status retrieved', status).send(res);
-}
-
-// Mark session as complete and increment free session counter
-// POST /chat/sessions/:sessionId/complete
-
-export async function completeSession(
-    req: ProtectedRequest,
-    res: Response,
-): Promise<void> {
-    const { sessionId } = req.params;
-    const input = req.body as CompleteSessionInput;
-
-    const result = await ChatService.completeSession(
-        req.user.id,
-        sessionId,
-        input.phase,
-        input.turnCount,
-    );
-
-    new SuccessResponse('Session completed', result).send(res);
 }
 
 // Mark coupon popup as shown for user
@@ -329,7 +309,9 @@ export async function markCouponPopupShown(
         return;
     }
 
-    const result = await ChatService.markCouponPopupShown(req.user.id);
+    await ChatService.acknowledgeCouponPopup(req.user.id);
+
+    const result = { popupShown: true, message: 'Coupon popup status updated' };
 
     new SuccessResponse('Coupon popup marked as shown', result).send(res);
 }
