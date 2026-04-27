@@ -134,36 +134,27 @@ export async function loginWithEmail(
 }
 
 export async function refreshTokenPair(
-    accessToken: string,
     refreshToken: string,
 ): Promise<{ accessToken: string; refreshToken: string }> {
-    const accessPayload = await JWT.decode(accessToken);
-    validateTokenData(accessPayload);
+    const refreshPayload = await JWT.validate(refreshToken);
+    validateTokenData(refreshPayload);
 
-    const userId = parseInt(accessPayload.sub, 10);
+    const userId = parseInt(refreshPayload.sub, 10);
     if (isNaN(userId)) {
         throw new AuthFailureError('Invalid user ID in token');
     }
 
     const adminUser = await getAdminUser(userId);
 
-    const refreshPayload = await JWT.validate(refreshToken);
-    validateTokenData(refreshPayload);
-
-    if (accessPayload.sub !== refreshPayload.sub) {
-        throw new AuthFailureError('Invalid access token');
-    }
-
     const keystore = await prisma.keystore.findFirst({
         where: {
             clientId: adminUser.id,
-            primaryKey: accessPayload.prm,
             secondaryKey: refreshPayload.prm,
         },
     });
 
     if (!keystore) {
-        throw new AuthFailureError('Invalid access token');
+        throw new AuthFailureError('Invalid refresh token');
     }
 
     await prisma.keystore.delete({
