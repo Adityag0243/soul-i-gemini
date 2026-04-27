@@ -118,14 +118,14 @@ async function uploadFileToS3(file: UploadedFileLike): Promise<{
     key: string;
     url: string;
 }> {
-    if (!configS3.bucketName) {
+    if (!configS3.bucket) {
         throw new BadRequestError('AWS_S3_BUCKET is required for uploads');
     }
 
     const key = buildMediaKey(file);
     await s3Client.send(
         new PutObjectCommand({
-            Bucket: configS3.bucketName,
+            Bucket: configS3.bucket,
             Key: key,
             Body: file.buffer,
             ContentType: file.mimetype,
@@ -134,18 +134,18 @@ async function uploadFileToS3(file: UploadedFileLike): Promise<{
 
     return {
         key,
-        url: `s3://${configS3.bucketName}/${key}`,
+        url: `s3://${configS3.bucket}/${key}`,
     };
 }
 
 async function deleteFileFromS3(key: string | null | undefined): Promise<void> {
-    if (!key || !configS3.bucketName) {
+    if (!key || !configS3.bucket) {
         return;
     }
 
     await s3Client.send(
         new DeleteObjectCommand({
-            Bucket: configS3.bucketName,
+            Bucket: configS3.bucket,
             Key: key,
         }),
     );
@@ -215,7 +215,7 @@ async function createPractice(
             mediaType: input.mediaType,
             mediaUrl: mediaUploadResult?.url ?? null,
             mediaKey: mediaUploadResult?.key ?? null,
-            mediaBucket: mediaUploadResult ? configS3.bucketName : null,
+            mediaBucket: mediaUploadResult ? configS3.bucket : null,
             mediaOriginalName: mediaFile?.originalname ?? null,
             mediaMimeType: mediaFile?.mimetype ?? null,
             mediaSizeBytes: mediaFile?.size ?? null,

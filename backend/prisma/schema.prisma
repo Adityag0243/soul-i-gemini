@@ -48,6 +48,7 @@ enum CrisisLevel {
 enum SubscriptionStatus {
   ACTIVE
   INACTIVE
+  FREE
   TRIALING
   EXPIRED
   CANCELED
