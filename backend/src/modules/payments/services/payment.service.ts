@@ -36,6 +36,9 @@ import {
     VerifyPaymentInput,
     CancelSubscriptionInput,
     UpgradeSubscriptionInput,
+    PauseSubscriptionInput,
+    ResumeSubscriptionInput,
+    PortalSessionInput,
 } from '../schemas/payment.schema';
 
 /**
@@ -682,6 +685,156 @@ class SubscriptionService {
             });
             throw new InternalError('Failed to fetch subscription history');
         }
+    }
+
+    async pauseSubscription(userId: number, input: PauseSubscriptionInput) {
+        const subscription = await subscriptionRepository.getSubscriptionById(input.subscriptionId);
+        if (subscription.userId !== userId) {
+            throw new BadRequestError('Unauthorized');
+        }
+        if (subscription.status !== 'ACTIVE') {
+            throw new BadRequestError('Only active subscriptions can be paused');
+        }
+        if (subscription.provider !== 'STRIPE' || !subscription.providerSubscriptionId) {
+            throw new BadRequestError('Pause is only supported for Stripe subscriptions');
+        }
+
+        const pauseDays = input.pausePeriodDays ?? 30;
+        const resumeAt = new Date(Date.now() + pauseDays * 24 * 60 * 60 * 1000);
+
+        await stripeGateway.pauseSubscription(subscription.providerSubscriptionId, resumeAt);
+
+        logger.info('Subscription paused', { subscriptionId: input.subscriptionId, userId, resumeAt });
+
+        return {
+            subscriptionId: input.subscriptionId,
+            status: 'paused',
+            resumeAt: resumeAt.toISOString(),
+        };
+    }
+
+    async resumeSubscription(userId: number, input: { subscriptionId: string }) {
+        const subscription = await subscriptionRepository.getSubscriptionById(input.subscriptionId);
+        if (subscription.userId !== userId) {
+            throw new BadRequestError('Unauthorized');
+        }
+        if (subscription.provider !== 'STRIPE' || !subscription.providerSubscriptionId) {
+            throw new BadRequestError('Resume is only supported for Stripe subscriptions');
+        }
+
+        await stripeGateway.resumeSubscription(subscription.providerSubscriptionId);
+
+        logger.info('Subscription resumed', { subscriptionId: input.subscriptionId, userId });
+
+        return {
+            subscriptionId: input.subscriptionId,
+            status: 'active',
+        };
+    }
+
+    async getUpcomingCharge(userId: number) {
+        const subscription = await subscriptionRepository.getActiveSubscriptionByUserId(userId);
+        if (!subscription || subscription.provider !== 'STRIPE' || !subscription.providerSubscriptionId) {
+            return { upcoming: null };
+        }
+
+        const stripeSub = await stripeGateway.getSubscription(subscription.providerSubscriptionId);
+        const customerId = typeof stripeSub.customer === 'string'
+            ? stripeSub.customer
+            : stripeSub.customer.id;
+
+        const invoice = await stripeGateway.getUpcomingInvoice(customerId);
+        if (!invoice) {
+            return { upcoming: null };
+        }
+
+        return {
+            upcoming: {
+                amountDue: invoice.amount_due / 100,
+                currency: invoice.currency,
+                nextPaymentDate: invoice.next_payment_attempt
+                    ? new Date(invoice.next_payment_attempt * 1000).toISOString()
+                    : null,
+                periodStart: invoice.period_start
+                    ? new Date(invoice.period_start * 1000).toISOString()
+                    : null,
+                periodEnd: invoice.period_end
+                    ? new Date(invoice.period_end * 1000).toISOString()
+                    : null,
+            },
+        };
+    }
+
+    async createPortalSession(userId: number, input: PortalSessionInput) {
+        const subscription = await subscriptionRepository.getActiveSubscriptionByUserId(userId);
+        if (!subscription || subscription.provider !== 'STRIPE' || !subscription.providerSubscriptionId) {
+            throw new BadRequestError('No active Stripe subscription found');
+        }
+
+        const stripeSub = await stripeGateway.getSubscription(subscription.providerSubscriptionId);
+        const customerId = typeof stripeSub.customer === 'string'
+            ? stripeSub.customer
+            : stripeSub.customer.id;
+
+        const url = await stripeGateway.createBillingPortalSession(
+            customerId,
+            input.returnUrl,
+        );
+
+        return { url };
+    }
+
+    async getEntitlements(userId: number) {
+        const subscription =
+            await subscriptionRepository.getActiveSubscriptionByUserId(userId);
+
+        const user = await prisma.user.findUniqueOrThrow({
+            where: { id: userId },
+        });
+
+        const isActive =
+            !!subscription &&
+            (subscription.status === 'ACTIVE' ||
+                subscription.status === 'TRIALING') &&
+            !!subscription.currentPeriodEnd &&
+            subscription.currentPeriodEnd > new Date();
+
+        const isTrialing =
+            isActive && subscription?.status === 'TRIALING';
+
+        const hasPaid = isActive;
+        const blocked =
+            user.freeSessionsCompleted >= 3 && !hasPaid;
+
+        return {
+            isActive,
+            isTrialing,
+            plan: subscription
+                ? {
+                      id: subscription.planId,
+                      name: (subscription as any).plan?.name ?? null,
+                      priceUsd: (subscription as any).plan?.priceUsd
+                          ? Number((subscription as any).plan.priceUsd)
+                          : null,
+                  }
+                : null,
+            currentPeriodEnd:
+                subscription?.currentPeriodEnd?.toISOString() ?? null,
+            features: {
+                unlimitedChats: isActive,
+                voiceTranscription: isActive,
+                voiceSynthesis: isActive,
+                insightsExtended: isActive,
+            },
+            freeTier: {
+                used: user.freeSessionsCompleted,
+                total: 3,
+                blocked,
+                showCouponPopup:
+                    user.freeSessionsCompleted >= 3 &&
+                    !user.couponPopupShown,
+            },
+        };
     }
 }
 

@@ -8,6 +8,9 @@ import {
     initiateCheckoutSchema,
     verifyPaymentSchema,
     cancelSubscriptionSchema,
+    pauseSubscriptionSchema,
+    resumeSubscriptionSchema,
+    portalSessionSchema,
     getSubscriptionHistorySchema,
     getPaymentHistorySchema,
     couponRedeemSchema,
@@ -147,6 +150,26 @@ router.get(
 
 registry.registerPath({
     method: 'get',
+    path: '/payments/subscription/entitlements',
+    summary: 'Get subscription entitlements',
+    description:
+        'Single source of truth for what this user can do right now. Mobile reads on cold start and after payment events.',
+    tags: ['Payments - Subscription'],
+    security: [{ bearerAuth: [] }],
+    responses: {
+        200: { description: 'Entitlements retrieved' },
+        401: { description: 'Unauthorized' },
+    },
+});
+
+router.get(
+    '/subscription/entitlements',
+    authMiddleware,
+    asyncHandler(PaymentController.getEntitlements),
+);
+
+registry.registerPath({
+    method: 'get',
     path: '/payments/subscription/history',
     summary: 'Get Subscription History',
     description: "Retrieve user's subscription history with pagination",
@@ -208,6 +231,124 @@ router.post(
     authMiddleware,
     validator(cancelSubscriptionSchema, ValidationSource.BODY),
     asyncHandler(PaymentController.cancelSubscription),
+);
+
+// ============ Subscription Pause / Resume ============
+
+registry.registerPath({
+    method: 'post',
+    path: '/payments/subscription/pause',
+    summary: 'Pause Subscription',
+    description:
+        'Pause an active Stripe subscription. Collection is voided and resumes after the pause period.',
+    tags: ['Payments - Subscription'],
+    security: [{ bearerAuth: [] }],
+    request: {
+        body: {
+            content: {
+                'application/json': {
+                    schema: pauseSubscriptionSchema,
+                },
+            },
+        },
+    },
+    responses: {
+        200: { description: 'Subscription paused' },
+        400: { description: 'Invalid subscription or not eligible for pause' },
+        401: { description: 'Unauthorized' },
+    },
+});
+
+router.post(
+    '/subscription/pause',
+    authMiddleware,
+    validator(pauseSubscriptionSchema, ValidationSource.BODY),
+    asyncHandler(PaymentController.pauseSubscription),
+);
+
+registry.registerPath({
+    method: 'post',
+    path: '/payments/subscription/resume',
+    summary: 'Resume Subscription',
+    description: 'Resume a paused Stripe subscription immediately.',
+    tags: ['Payments - Subscription'],
+    security: [{ bearerAuth: [] }],
+    request: {
+        body: {
+            content: {
+                'application/json': {
+                    schema: resumeSubscriptionSchema,
+                },
+            },
+        },
+    },
+    responses: {
+        200: { description: 'Subscription resumed' },
+        400: { description: 'Invalid subscription or not paused' },
+        401: { description: 'Unauthorized' },
+    },
+});
+
+router.post(
+    '/subscription/resume',
+    authMiddleware,
+    validator(resumeSubscriptionSchema, ValidationSource.BODY),
+    asyncHandler(PaymentController.resumeSubscription),
+);
+
+// ============ Upcoming Charge ============
+
+registry.registerPath({
+    method: 'get',
+    path: '/payments/subscription/upcoming-charge',
+    summary: 'Get Upcoming Charge',
+    description:
+        "Preview the next invoice amount and date for the user's active Stripe subscription.",
+    tags: ['Payments - Subscription'],
+    security: [{ bearerAuth: [] }],
+    responses: {
+        200: { description: 'Upcoming charge retrieved (null if none)' },
+        401: { description: 'Unauthorized' },
+    },
+});
+
+router.get(
+    '/subscription/upcoming-charge',
+    authMiddleware,
+    asyncHandler(PaymentController.getUpcomingCharge),
+);
+
+// ============ Billing Portal ============
+
+registry.registerPath({
+    method: 'post',
+    path: '/payments/checkout/portal',
+    summary: 'Create Billing Portal Session',
+    description:
+        'Generate a Stripe billing portal URL where the user can manage payment methods, view invoices, and cancel.',
+    tags: ['Payments - Checkout'],
+    security: [{ bearerAuth: [] }],
+    request: {
+        body: {
+            content: {
+                'application/json': {
+                    schema: portalSessionSchema,
+                },
+            },
+        },
+    },
+    responses: {
+        200: { description: 'Portal session URL returned' },
+        400: { description: 'No Stripe subscription found' },
+        401: { description: 'Unauthorized' },
+    },
+});
+
+router.post(
+    '/checkout/portal',
+    authMiddleware,
+    validator(portalSessionSchema, ValidationSource.BODY),
+    asyncHandler(PaymentController.createPortalSession),
 );
 
 // ============ Payment History ============

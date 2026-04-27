@@ -74,6 +74,12 @@ export const resumeSubscriptionSchema = z.object({
 
 export type ResumeSubscriptionInput = z.infer<typeof resumeSubscriptionSchema>;
 
+export const portalSessionSchema = z.object({
+    returnUrl: z.string().url('Invalid return URL'),
+});
+
+export type PortalSessionInput = z.infer<typeof portalSessionSchema>;
+
 export const getSubscriptionHistorySchema = z.object({
     page: z.coerce.number().min(1).default(1),
     pageSize: z.coerce.number().min(1).max(100).default(10),
