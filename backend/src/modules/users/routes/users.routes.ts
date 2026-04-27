@@ -6,6 +6,7 @@ import authMiddleware from '../../../middlewares/auth.middleware';
 import { avatarUpload } from '../../../middlewares/upload.middleware';
 import { registry } from '../../../swagger-docs/swagger';
 import * as UsersController from '../controllers/users.controller';
+import * as PracticeController from '../../practices/controllers/practice.controller';
 import { setCallNameSchema, updateMeSchema } from '../schemas/users.schema';
 
 const router = Router();
@@ -139,5 +140,62 @@ registry.registerPath({
 });
 
 router.delete('/me/avatar', asyncHandler(UsersController.deleteAvatar));
+
+// ============ Saved Practices ============
+
+registry.registerPath({
+    method: 'get',
+    path: '/users/me/practices/saved',
+    summary: 'Get Saved Practices',
+    description: "List all practices the current user has saved.",
+    tags: ['Users - Practices'],
+    security: [{ bearerAuth: [] }],
+    responses: {
+        200: { description: 'Saved practices retrieved' },
+        401: { description: 'Unauthorized' },
+    },
+});
+
+router.get(
+    '/me/practices/saved',
+    asyncHandler(PracticeController.getSavedPractices),
+);
+
+registry.registerPath({
+    method: 'post',
+    path: '/users/me/practices/{id}/save',
+    summary: 'Save a Practice',
+    description: 'Add a practice to the user\'s saved list. Idempotent.',
+    tags: ['Users - Practices'],
+    security: [{ bearerAuth: [] }],
+    responses: {
+        200: { description: 'Practice saved' },
+        401: { description: 'Unauthorized' },
+        404: { description: 'Practice not found' },
+    },
+});
+
+router.post(
+    '/me/practices/:id/save',
+    asyncHandler(PracticeController.savePractice),
+);
+
+registry.registerPath({
+    method: 'delete',
+    path: '/users/me/practices/{id}/save',
+    summary: 'Unsave a Practice',
+    description: 'Remove a practice from the user\'s saved list.',
+    tags: ['Users - Practices'],
+    security: [{ bearerAuth: [] }],
+    responses: {
+        200: { description: 'Practice unsaved' },
+        401: { description: 'Unauthorized' },
+    },
+});
+
+router.delete(
+    '/me/practices/:id/save',
+    asyncHandler(PracticeController.unsavePractice),
+);
 
 export default router;

@@ -134,6 +134,8 @@ model User {
   deviceTokens      UserDeviceToken[]
   mobileOtps        MobileOtp[]
   couponRedemptions CouponRedemption[]
+  practiceSaves       UserPracticeSave[]
+  practiceAssignments PracticeAssignment[]
 
   @@index([email])
   @@map("users")
@@ -478,7 +480,9 @@ model Practice {
   createdAt DateTime @default(now()) @map("created_at")
 
   energyNode EnergyNode?        @relation(fields: [energyNodeId], references: [id], onDelete: SetNull)
-  feedbacks  PracticeFeedback[]
+  feedbacks    PracticeFeedback[]
+  saves        UserPracticeSave[]
+  assignments  PracticeAssignment[]
 
   @@index([energyNodeId])
   @@index([isActive])
@@ -501,6 +505,38 @@ model PracticeFeedback {
   @@index([userId])
   @@index([practiceId])
   @@map("practice_feedbacks")
+}
+
+model UserPracticeSave {
+  id         String @id @default(uuid()) @db.Uuid
+  userId     Int    @map("user_id")
+  practiceId String @map("practice_id") @db.Uuid
+
+  savedAt DateTime @default(now()) @map("saved_at")
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  practice Practice @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, practiceId])
+  @@index([userId])
+  @@map("user_practice_saves")
+}
+
+model PracticeAssignment {
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     Int       @map("user_id")
+  practiceId String    @map("practice_id") @db.Uuid
+  assignedAt DateTime  @default(now()) @map("assigned_at")
+  dueDate    DateTime  @db.Date @map("due_date")
+  completedAt DateTime? @map("completed_at")
+  source     String?   @db.VarChar(50)
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  practice Practice @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, dueDate])
+  @@map("practice_assignments")
 }
 
 // SUBSCRIPTIONS
