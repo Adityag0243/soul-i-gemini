@@ -66,6 +66,11 @@ export interface ChatSessionWithMessagesDto extends ChatSessionDto {
     messages: ChatMessageDto[];
 }
 
+export interface CreateSessionResponseDto {
+    session: ChatSessionDto;
+    greetingMessage: ChatMessageDto | null;
+}
+
 export interface SessionListResponseDto {
     sessions: ChatSessionDto[];
     total: number;

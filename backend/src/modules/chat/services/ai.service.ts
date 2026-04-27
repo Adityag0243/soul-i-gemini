@@ -548,6 +548,54 @@ export async function* callSouliChatStreamAPI(
     }
 }
 
+// ── Greeting API (personalized session opener) ─────────────────────────────
+
+export interface GreetingResponse {
+    reply: string;
+    phase: string;
+    sessionId: string;
+}
+
+export async function callSouliGreetingAPI(
+    sessionId: string,
+    userName?: string,
+): Promise<GreetingResponse> {
+    const form = new URLSearchParams();
+    form.append('session_id', sessionId);
+    form.append('user_name', userName || 'buddy');
+
+    try {
+        const response = await fetch(buildServiceUrl('/session/greeting'), {
+            method: 'POST',
+            headers: {
+                ...internalHeaders(),
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: form.toString(),
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            logger.error('Souli greeting API error:', {
+                status: response.status,
+                error: errorText,
+            });
+            throw new InternalError('AI greeting service unavailable');
+        }
+
+        const data = (await response.json()) as SouliChatResponse;
+        return {
+            reply: data.reply,
+            phase: data.phase,
+            sessionId: data.session_id,
+        };
+    } catch (error) {
+        if (error instanceof InternalError) throw error;
+        logger.error('Souli greeting API connection failed:', error);
+        throw new InternalError('AI greeting service connection failed');
+    }
+}
+
 export interface VoiceAIResponse {
     audio: Buffer;
     transcript: string;
@@ -739,6 +787,7 @@ export async function healthCheck(): Promise<boolean> {
 export default {
     generateResponse,
     getSessionState,
+    callSouliGreetingAPI,
     callSouliChatStreamAPI,
     healthCheck,
     detectCrisisLevel,

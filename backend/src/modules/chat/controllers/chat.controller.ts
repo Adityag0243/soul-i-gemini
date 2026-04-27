@@ -41,9 +41,9 @@ export async function createSession(
     res: Response,
 ): Promise<void> {
     const input = req.body as CreateSessionInput;
-    const session = await ChatService.createSession(req.user.id, input);
+    const result = await ChatService.createSession(req.user.id, input);
 
-    new SuccessCreatedResponse('Chat session created', session).send(res);
+    new SuccessCreatedResponse('Chat session created', result).send(res);
 }
 
 //get all chat sessions for the current user

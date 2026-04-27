@@ -183,15 +183,16 @@ class GeminiEngine:
 
     # ── Public: Greeting ──────────────────────────────────────────────────────
 
-    def greeting(self) -> str:
+    def greeting(self, user_name: Optional[str] = None) -> str:
         """
-        Return the opening greeting.
+        Return the opening greeting, optionally personalized with the user's name.
         Called before any user message (same as ConversationEngine.greeting()).
         """
         if self.state is None:
             self.new_session()
 
-        text = "Hi, I'm Souli. I'm here with you. How's your energy feeling right now?"
+        name = (user_name or "").strip() or "buddy"
+        text = f"Hi {name}, I'm Souli. I'm here with you. How's your energy feeling right now?"
         self.state.messages.append({"role": "assistant", "content": text})
         self._mongo_append(role="assistant", phase=PHASE_GREETING, content=text)
         return text

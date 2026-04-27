@@ -19,6 +19,7 @@ import AIService, { SouliSessionState, StreamEvent } from './ai.service';
 import {
     ChatSessionDto,
     ChatMessageDto,
+    CreateSessionResponseDto,
     FreeTierStatusDto,
     SendMessageResponseDto,
     SaveVoiceTranscriptResponseDto,
@@ -98,7 +99,7 @@ async function buildFreeTierStatus(
 export async function createSession(
     userId: number,
     input: CreateSessionInput,
-): Promise<ChatSessionDto> {
+): Promise<CreateSessionResponseDto> {
     // D12: block session creation when free tier exhausted and no active subscription.
     const user = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
     if (user.freeSessionsCompleted >= 3) {
@@ -117,12 +118,36 @@ export async function createSession(
 
     logger.info('Chat session created', { sessionId: session.id, userId });
 
-    // track analytics event
     await trackAnalyticsEvent(userId, 'session_created', {
         sessionId: session.id,
     });
 
-    return toSessionDto(session);
+    // Fetch personalized greeting from AI service and persist it as the
+    // first assistant message so mobile gets it in one round-trip.
+    let greetingMessage: ChatMessageDto | null = null;
+    try {
+        const greeting = await AIService.callSouliGreetingAPI(
+            session.id,
+            user.callName || undefined,
+        );
+        const msg = await ChatMessageRepo.create({
+            sessionId: session.id,
+            role: MessageRole.ASSISTANT,
+            content: greeting.reply,
+            phase: greeting.phase,
+        });
+        greetingMessage = toMessageDto(msg, session);
+    } catch (error) {
+        logger.warn('AI greeting failed — session created without greeting', {
+            sessionId: session.id,
+            error,
+        });
+    }
+
+    return {
+        session: toSessionDto(session),
+        greetingMessage,
+    };
 }
 
 // get all chat sessions for a user
