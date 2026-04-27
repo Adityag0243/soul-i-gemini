@@ -11,6 +11,7 @@ import { paymentRoutes, couponRoutes } from '../modules/payments/routes/payment.
 import { checkinRoutes } from '../modules/checkins';
 import { energyNodeRoutes, practiceRoutes, assignmentRoutes } from '../modules/practices';
 import { referralRoutes } from '../modules/referrals';
+import { aiEventRoutes } from '../modules/ai-events';
 import { Permission } from '@prisma/client';
 
 const router = Router();
@@ -20,6 +21,8 @@ router.get('/', (_req, res) => {
 });
 
 router.use('/health', healthRoutes);
+
+router.use('/internal/ai-events', aiEventRoutes);
 
 router.use(apiKeyMiddleware);
 
