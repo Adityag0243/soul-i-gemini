@@ -8,6 +8,7 @@ import { notificationsRoutes } from '../modules/notifications';
 import { usersRoutes } from '../modules/users';
 import { voiceRoutes } from '../modules/voice';
 import { paymentRoutes, couponRoutes } from '../modules/payments/routes/payment.routes';
+import { checkinRoutes } from '../modules/checkins';
 import { Permission } from '@prisma/client';
 
 const router = Router();
@@ -34,6 +35,8 @@ router.use('/chat', chatRoutes);
 router.use('/voice', voiceRoutes);
 
 router.use('/payments', paymentRoutes);
+
+router.use('/checkins', checkinRoutes);
 
 router.use('/coupons', couponRoutes);
 
