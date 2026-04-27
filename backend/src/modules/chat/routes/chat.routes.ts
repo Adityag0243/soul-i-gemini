@@ -125,7 +125,11 @@ registry.registerPath({
     method: 'post',
     path: '/chat/messages',
     summary: 'Send Message',
-    description: 'Send a message to a chat session and receive AI response.',
+    description:
+        'Send a message to a chat session and receive AI response. ' +
+        'Pass `?stream=true` to receive an SSE stream instead of JSON. ' +
+        'SSE events: chunk ({text}), metadata ({phase, energy_node, ...}), done ({userMessage, aiMessage, session, freeTier}), error ({message}). ' +
+        'Optional `Idempotency-Key` header dedupes retries within a 60s window.',
     tags: ['Chat'],
     security: [{ apiKey: [], bearerAuth: [] }],
     request: {
@@ -138,10 +142,12 @@ registry.registerPath({
         },
     },
     responses: {
-        201: { description: 'Message sent and response received' },
+        200: { description: 'SSE stream (when ?stream=true)' },
+        201: { description: 'Message sent and response received (JSON)' },
         400: { description: 'Validation error or session archived' },
         401: { description: 'Authentication required' },
         404: { description: 'Session not found' },
+        409: { description: 'Duplicate Idempotency-Key still processing' },
     },
 });
 

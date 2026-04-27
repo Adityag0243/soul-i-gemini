@@ -14,6 +14,25 @@ import {
     GetMessagesQuery,
 } from '../schemas/chat.schema';
 
+// ── Idempotency-Key store (T9 — Phase 12.3) ────────────────────────────────
+// In-memory, per-process. Upgrade to Redis if running multiple replicas.
+
+interface IdempotencyEntry {
+    status: 'processing' | 'done';
+    result?: unknown;
+    createdAt: number;
+}
+
+const IDEMPOTENCY_TTL = 60_000;
+const idempotencyStore = new Map<string, IdempotencyEntry>();
+
+function cleanExpiredKeys(): void {
+    const now = Date.now();
+    for (const [key, entry] of idempotencyStore) {
+        if (now - entry.createdAt > IDEMPOTENCY_TTL) idempotencyStore.delete(key);
+    }
+}
+
 //create a new chat session
 // POST /chat/sessions
 
@@ -110,10 +129,89 @@ export async function sendMessage(
     req: ProtectedRequest,
     res: Response,
 ): Promise<void> {
+    if (req.query.stream === 'true') {
+        return sendMessageStream(req, res);
+    }
+
     const input = req.body as SendMessageInput;
     const result = await ChatService.sendMessage(req.user.id, input);
 
     new SuccessCreatedResponse('Message sent', result).send(res);
+}
+
+// SSE streaming send (T9 — Phase 12.2 + 12.3)
+// POST /chat/messages?stream=true
+
+async function sendMessageStream(
+    req: ProtectedRequest,
+    res: Response,
+): Promise<void> {
+    const input = req.body as SendMessageInput;
+    const idempotencyKey = req.headers['idempotency-key'] as
+        | string
+        | undefined;
+
+    if (idempotencyKey) {
+        cleanExpiredKeys();
+        const existing = idempotencyStore.get(idempotencyKey);
+        if (existing) {
+            if (existing.status === 'processing') {
+                res.status(409).json({
+                    success: false,
+                    message: 'Duplicate request already in progress',
+                });
+                return;
+            }
+            if (existing.status === 'done') {
+                new SuccessCreatedResponse(
+                    'Message sent (cached)',
+                    existing.result,
+                ).send(res);
+                return;
+            }
+        }
+        idempotencyStore.set(idempotencyKey, {
+            status: 'processing',
+            createdAt: Date.now(),
+        });
+    }
+
+    res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        Connection: 'keep-alive',
+        'X-Accel-Buffering': 'no',
+    });
+
+    let donePayload: unknown = null;
+
+    try {
+        for await (const frame of ChatService.sendMessageStream(
+            req.user.id,
+            input,
+        )) {
+            if (frame.event === 'done') donePayload = frame.data;
+            res.write(
+                `event: ${frame.event}\ndata: ${JSON.stringify(frame.data)}\n\n`,
+            );
+        }
+    } catch (error: unknown) {
+        const message =
+            error instanceof Error ? error.message : 'Unknown error';
+        res.write(
+            `event: error\ndata: ${JSON.stringify({ message })}\n\n`,
+        );
+    }
+
+    if (idempotencyKey && donePayload) {
+        idempotencyStore.set(idempotencyKey, {
+            status: 'done',
+            result: donePayload,
+            createdAt: Date.now(),
+        });
+    }
+
+    res.end();
 }
 
 // save voice transcript messages into chat history

@@ -4,6 +4,7 @@ Souli REST API — FastAPI server for mobile app integration
 
 Endpoints:
   POST /chat              — text message → text reply
+  POST /chat/stream       — text message → SSE streaming reply (T9)
   POST /voice             — audio file upload → text reply + audio bytes
   POST /session/reset     — reset conversation state for a session
   GET  /session/{id}/state — get current phase, energy_node, turn count
@@ -27,16 +28,18 @@ In Docker (GCP):
 from __future__ import annotations
 from dotenv import load_dotenv
 load_dotenv()
+import asyncio
 import io
+import json as _json
 import logging
 import os
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -273,6 +276,78 @@ def chat(req: ChatRequest):
 def _safe_header(text: str) -> str:
     """Strip non-latin-1 chars so HTTP headers don't blow up on em-dashes, smart quotes etc."""
     return text.encode("latin-1", errors="replace").decode("latin-1")
+
+
+# ── 1b. Streaming Text Chat (T9) ────────────────────────────────────────────
+
+def _chunk_text(text: str, max_chars: int = 40) -> List[str]:
+    """Break text into word-boundary chunks for SSE streaming."""
+    words = text.split(" ")
+    chunks: List[str] = []
+    current = ""
+    for word in words:
+        candidate = f"{current} {word}".strip() if current else word
+        if len(candidate) > max_chars and current:
+            chunks.append(current)
+            current = word
+        else:
+            current = candidate
+    if current:
+        chunks.append(current)
+    return chunks or [text]
+
+
+@app.post("/chat/stream", summary="[SSE] Send a text message, receive streaming reply")
+async def chat_stream(req: ChatRequest):
+    """
+    SSE streaming version of /chat. Same input, streamed output.
+
+    Events emitted (one per SSE frame):
+      - **chunk**:    `{"text": "..."}` — incremental reply text
+      - **metadata**: `{phase, energy_node, secondary_node, node_reasoning, turn_count, solution_step, solution_complete}` — AI metadata after full reply
+      - **done**:     `{"session_id": "...", "full_reply": "..."}` — stream complete
+      - **error**:    `{"message": "..."}` — on failure (terminal)
+    """
+    if not req.message.strip():
+        raise HTTPException(status_code=400, detail="message cannot be empty")
+
+    engine = _get_or_create_gemini_engine(req.session_id)
+
+    async def _sse() -> AsyncGenerator[str, None]:
+        try:
+            reply = engine.turn(req.message, session_id=req.session_id)
+            diag = engine.diagnosis_summary
+
+            for chunk in _chunk_text(reply, max_chars=40):
+                yield f"event: chunk\ndata: {_json.dumps({'text': chunk})}\n\n"
+                await asyncio.sleep(0)
+
+            metadata = {
+                "phase": engine.state.phase if engine.state else "unknown",
+                "energy_node": diag.get("energy_node"),
+                "secondary_node": diag.get("secondary_node"),
+                "node_reasoning": diag.get("node_reasoning"),
+                "turn_count": diag.get("turn_count", 0),
+                "solution_step": engine.state.solution_step if engine.state else None,
+                "solution_complete": engine.state.solution_complete if engine.state else False,
+            }
+            yield f"event: metadata\ndata: {_json.dumps(metadata)}\n\n"
+
+            yield f"event: done\ndata: {_json.dumps({'session_id': req.session_id, 'full_reply': reply})}\n\n"
+
+        except Exception as exc:
+            logger.error("Stream error for session %s: %s", req.session_id, exc)
+            yield f"event: error\ndata: {_json.dumps({'message': str(exc)})}\n\n"
+
+    return StreamingResponse(
+        _sse(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.get("/health", summary="Health check")

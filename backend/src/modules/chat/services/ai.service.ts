@@ -474,6 +474,80 @@ async function callSouliChatAPI(
     }
 }
 
+// ── SSE streaming client (T9 — Phase 12.2) ─────────────────────────────────
+
+export interface StreamEvent {
+    event: 'chunk' | 'metadata' | 'done' | 'error';
+    data: Record<string, unknown>;
+}
+
+export async function* callSouliChatStreamAPI(
+    userMessage: string,
+    sessionId: string,
+): AsyncGenerator<StreamEvent> {
+    const requestBody: SouliChatRequest = {
+        message: userMessage,
+        session_id: sessionId,
+    };
+
+    const response = await fetch(buildServiceUrl('/chat/stream'), {
+        method: 'POST',
+        headers: internalHeaders(),
+        body: JSON.stringify(requestBody),
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text();
+        logger.error('Souli stream API error:', {
+            status: response.status,
+            error: errorText,
+        });
+        throw new InternalError('AI stream service unavailable');
+    }
+
+    if (!response.body) {
+        throw new InternalError('AI stream service returned no body');
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    try {
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const parts = buffer.split('\n\n');
+            buffer = parts.pop() || '';
+
+            for (const raw of parts) {
+                if (!raw.trim()) continue;
+                const lines = raw.split('\n');
+                let eventType = '';
+                let data = '';
+                for (const line of lines) {
+                    if (line.startsWith('event: ')) eventType = line.slice(7);
+                    else if (line.startsWith('data: ')) data = line.slice(6);
+                }
+                if (eventType && data) {
+                    try {
+                        yield {
+                            event: eventType as StreamEvent['event'],
+                            data: JSON.parse(data),
+                        };
+                    } catch {
+                        logger.warn('Failed to parse SSE data', { eventType, data });
+                    }
+                }
+            }
+        }
+    } finally {
+        reader.releaseLock();
+    }
+}
+
 export interface VoiceAIResponse {
     audio: Buffer;
     transcript: string;
@@ -665,6 +739,7 @@ export async function healthCheck(): Promise<boolean> {
 export default {
     generateResponse,
     getSessionState,
+    callSouliChatStreamAPI,
     healthCheck,
     detectCrisisLevel,
     detectEmotion,

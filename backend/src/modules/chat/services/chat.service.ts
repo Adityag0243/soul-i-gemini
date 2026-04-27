@@ -15,7 +15,7 @@ import logger from '../../../core/logger';
 import { subscriptionRepository } from '../../../database/repositories/subscription.repo';
 import ChatSessionRepo from '../repositories/chat-session.repo';
 import ChatMessageRepo from '../repositories/chat-message.repo';
-import AIService, { SouliSessionState } from './ai.service';
+import AIService, { SouliSessionState, StreamEvent } from './ai.service';
 import {
     ChatSessionDto,
     ChatMessageDto,
@@ -608,6 +608,147 @@ export async function acknowledgeCouponPopup(userId: number): Promise<void> {
     });
 }
 
+// ── SSE streaming send (T9 — Phase 12.2) ───────────────────────────────────
+
+export interface SSEFrame {
+    event: string;
+    data: unknown;
+}
+
+export async function* sendMessageStream(
+    userId: number,
+    input: SendMessageInput,
+): AsyncGenerator<SSEFrame> {
+    const { sessionId, content } = input;
+
+    const session = await ChatSessionRepo.findByIdAndUserId(sessionId, userId);
+    if (!session) throw new NotFoundError('Chat session not found');
+    if (session.isArchived)
+        throw new BadRequestError('Cannot send messages to archived session');
+
+    const userCrisisLevel = AIService.detectCrisisLevel(content);
+    const detectedEmotion = AIService.detectEmotion(content);
+
+    const userMessage = await ChatMessageRepo.create({
+        sessionId,
+        role: MessageRole.USER,
+        content,
+        crisisLevel: userCrisisLevel,
+    });
+
+    const messageCount = await ChatMessageRepo.countBySessionId(sessionId);
+    if (messageCount === 1) {
+        await trackAnalyticsEvent(userId, 'chat_started', { sessionId });
+    }
+
+    const userMessageCount =
+        await ChatMessageRepo.countUserMessagesBySessionId(sessionId);
+    if (userMessageCount >= 3 && !session.isComplete) {
+        await prisma.$transaction([
+            prisma.chatSession.update({
+                where: { id: sessionId },
+                data: { isComplete: true },
+            }),
+            prisma.user.update({
+                where: { id: userId },
+                data: { freeSessionsCompleted: { increment: 1 } },
+            }),
+        ]);
+    }
+
+    let fullReply = '';
+    let metadata: Record<string, unknown> = {};
+
+    try {
+        for await (const evt of AIService.callSouliChatStreamAPI(
+            content,
+            sessionId,
+        )) {
+            if (evt.event === 'chunk') {
+                fullReply += (evt.data as { text: string }).text;
+                yield { event: 'chunk', data: evt.data };
+            } else if (evt.event === 'metadata') {
+                metadata = evt.data;
+                yield { event: 'metadata', data: evt.data };
+            } else if (evt.event === 'error') {
+                yield { event: 'error', data: evt.data };
+                return;
+            }
+        }
+    } catch (error) {
+        logger.error('AI stream failed, falling back', { sessionId, error });
+        yield {
+            event: 'error',
+            data: { message: 'AI stream service unavailable' },
+        };
+        return;
+    }
+
+    const assistantMessage = await ChatMessageRepo.create({
+        sessionId,
+        role: MessageRole.ASSISTANT,
+        content: fullReply,
+        crisisLevel: userCrisisLevel,
+        detectedEmotion,
+        phase: (metadata.phase as string) ?? undefined,
+        energyNode: (metadata.energy_node as string) ?? undefined,
+        secondaryNode: (metadata.secondary_node as string) ?? undefined,
+        nodeReasoning: (metadata.node_reasoning as string) ?? undefined,
+        turnCount: (metadata.turn_count as number) ?? undefined,
+        solutionStep: (metadata.solution_step as number) ?? undefined,
+    });
+
+    try {
+        await ChatSessionRepo.applyAssistantMessageMetadata(sessionId, {
+            phase: (metadata.phase as string) ?? undefined,
+            energyNode: (metadata.energy_node as string) ?? undefined,
+            secondaryNode: (metadata.secondary_node as string) ?? undefined,
+            solutionStep: (metadata.solution_step as number) ?? undefined,
+        });
+    } catch (error) {
+        logger.error('Failed to mirror stream metadata onto session', {
+            sessionId,
+            error,
+        });
+    }
+
+    if (
+        userCrisisLevel === CrisisLevel.HIGH ||
+        userCrisisLevel === CrisisLevel.MEDIUM
+    ) {
+        await handleCrisisEvent(
+            userId,
+            sessionId,
+            userMessage.id,
+            userCrisisLevel,
+        );
+    }
+
+    if (detectedEmotion) {
+        await storeEmotionalState(userId, sessionId, detectedEmotion);
+    }
+
+    if (session.title === 'New Chat' && messageCount <= 2) {
+        const newTitle = await generateSessionTitle(content);
+        if (newTitle) {
+            await ChatSessionRepo.update(sessionId, { title: newTitle });
+        }
+    }
+
+    const updatedSession =
+        (await ChatSessionRepo.findById(sessionId)) ?? session;
+
+    yield {
+        event: 'done',
+        data: {
+            userMessage: toMessageDto(userMessage, updatedSession),
+            aiMessage: toMessageDto(assistantMessage, updatedSession),
+            session: toSessionDto(updatedSession),
+            freeTier: await buildFreeTierStatus(userId, updatedSession),
+        },
+    };
+}
+
 export default {
     createSession,
     getSessions,
@@ -616,6 +757,7 @@ export default {
     archiveSession,
     deleteSession,
     sendMessage,
+    sendMessageStream,
     saveVoiceTranscript,
     getMessages,
     getSessionAiState,
