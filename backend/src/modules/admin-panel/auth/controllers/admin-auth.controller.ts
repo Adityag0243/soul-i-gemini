@@ -45,13 +45,9 @@ export async function refreshTokens(
     req: ProtectedRequest,
     res: Response,
 ): Promise<void> {
-    const accessToken = getAccessToken(req);
     const refreshToken = getRefreshToken(req);
 
-    const tokens = await AdminAuthService.refreshTokenPair(
-        accessToken,
-        refreshToken,
-    );
+    const tokens = await AdminAuthService.refreshTokenPair(refreshToken);
 
     setAdminCookies(res, tokens);
 
