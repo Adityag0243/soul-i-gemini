@@ -31,6 +31,22 @@ export const googleLoginSchema = z.object({
     idToken: z.string().min(1, 'Google ID token is required'),
 });
 
+// Apple Login Schema. fullName is only sent on first authorization (Apple's
+// contract); subsequent logins omit it. authorizationCode is accepted for
+// forward-compat with future server-to-server token validation but currently
+// unused by the verifier.
+export const appleLoginSchema = z.object({
+    identityToken: z.string().min(1, 'Apple identity token is required'),
+    authorizationCode: z.string().optional(),
+    fullName: z
+        .object({
+            givenName: z.string().optional(),
+            familyName: z.string().optional(),
+        })
+        .optional(),
+    nonce: z.string().optional(),
+});
+
 // Anonymous Login Schema
 export const anonymousLoginSchema = z.object({
     name: z.string().max(255).optional(),
@@ -88,6 +104,40 @@ export const forgotPasswordResetSchema = z
         path: ['confirmPassword'],
     });
 
+// Email verification — confirm step. Send step has no body.
+export const emailVerifyConfirmSchema = z.object({
+    otp: z.string().regex(/^\d{6}$/, 'OTP must be exactly 6 digits'),
+});
+
+// Mobile OTP. Number is E.164 (e.g. +919876543210). Permissive 8–15 digit
+// regex; libphonenumber-js can replace this when we need stricter validation.
+export const mobileOtpSendSchema = z.object({
+    mobileNumber: z
+        .string()
+        .regex(/^\+\d{8,15}$/, 'Invalid mobile number — must be E.164 (e.g. +919876543210)'),
+    intent: z.enum(['login', 'link']),
+});
+
+export const mobileOtpVerifySchema = z.object({
+    requestId: z.string().uuid('Invalid requestId'),
+    otp: z.string().regex(/^\d{6}$/, 'OTP must be exactly 6 digits'),
+});
+
+// Legacy single-shot reset (kept for 1 release per D7). Combines verify+reset
+// in one body — the controller chains internally so the new 3-step flow is
+// the single source of truth.
+export const legacyResetPasswordSchema = z
+    .object({
+        email: z.string().email('Invalid email format'),
+        otp: z.string().regex(/^\d{6}$/, 'OTP must be exactly 6 digits'),
+        newPassword: passwordSchema,
+        confirmPassword: z.string().min(1, 'Confirm password is required'),
+    })
+    .refine((data) => data.newPassword === data.confirmPassword, {
+        message: 'Passwords do not match',
+        path: ['confirmPassword'],
+    });
+
 export const authRequestSchema = z
     .object({
         headers: z.object({
@@ -131,6 +181,7 @@ export const refreshTokenSchema = z
 registry.register('EmailRegisterSchema', emailRegisterSchema);
 registry.register('EmailLoginSchema', emailLoginSchema);
 registry.register('GoogleLoginSchema', googleLoginSchema);
+registry.register('AppleLoginSchema', appleLoginSchema);
 registry.register('AnonymousLoginSchema', anonymousLoginSchema);
 registry.register('SouliKeyRestoreSchema', souliKeyRestoreSchema);
 registry.register('ResetJourneySchema', resetJourneySchema);
@@ -138,11 +189,16 @@ registry.register('EraseAllDataSchema', eraseAllDataSchema);
 registry.register('ForgotPasswordRequestSchema', forgotPasswordRequestSchema);
 registry.register('ForgotPasswordVerifySchema', forgotPasswordVerifySchema);
 registry.register('ForgotPasswordResetSchema', forgotPasswordResetSchema);
+registry.register('LegacyResetPasswordSchema', legacyResetPasswordSchema);
+registry.register('EmailVerifyConfirmSchema', emailVerifyConfirmSchema);
+registry.register('MobileOtpSendSchema', mobileOtpSendSchema);
+registry.register('MobileOtpVerifySchema', mobileOtpVerifySchema);
 registry.register('AuthRequestSchema', authRequestSchema);
 
 export type EmailRegisterInput = z.infer<typeof emailRegisterSchema>;
 export type EmailLoginInput = z.infer<typeof emailLoginSchema>;
 export type GoogleLoginInput = z.infer<typeof googleLoginSchema>;
+export type AppleLoginInput = z.infer<typeof appleLoginSchema>;
 export type AnonymousLoginInput = z.infer<typeof anonymousLoginSchema>;
 export type SouliKeyRestoreInput = z.infer<typeof souliKeyRestoreSchema>;
 export type ResetJourneyInput = z.infer<typeof resetJourneySchema>;
@@ -157,3 +213,9 @@ export type ForgotPasswordVerifyInput = z.infer<
 export type ForgotPasswordResetInput = z.infer<
     typeof forgotPasswordResetSchema
 >;
+export type LegacyResetPasswordInput = z.infer<
+    typeof legacyResetPasswordSchema
+>;
+export type EmailVerifyConfirmInput = z.infer<typeof emailVerifyConfirmSchema>;
+export type MobileOtpSendInput = z.infer<typeof mobileOtpSendSchema>;
+export type MobileOtpVerifyInput = z.infer<typeof mobileOtpVerifySchema>;

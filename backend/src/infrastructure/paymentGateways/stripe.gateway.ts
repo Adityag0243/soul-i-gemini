@@ -300,6 +300,76 @@ class StripeGateway {
         }
     }
 
+    async pauseSubscription(
+        subscriptionId: string,
+        resumeAt: Date,
+    ): Promise<Stripe.Subscription> {
+        try {
+            const sub = await this.getStripeClient().subscriptions.update(
+                subscriptionId,
+                {
+                    pause_collection: {
+                        behavior: 'void',
+                        resumes_at: Math.floor(resumeAt.getTime() / 1000),
+                    },
+                },
+            );
+            logger.info('Stripe subscription paused', { subscriptionId });
+            return sub;
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Unknown error';
+            logger.error('Failed to pause subscription', { error: message, subscriptionId });
+            throw new InternalError('Failed to pause subscription');
+        }
+    }
+
+    async resumeSubscription(
+        subscriptionId: string,
+    ): Promise<Stripe.Subscription> {
+        try {
+            const sub = await this.getStripeClient().subscriptions.update(
+                subscriptionId,
+                { pause_collection: '' as any },
+            );
+            logger.info('Stripe subscription resumed', { subscriptionId });
+            return sub;
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Unknown error';
+            logger.error('Failed to resume subscription', { error: message, subscriptionId });
+            throw new InternalError('Failed to resume subscription');
+        }
+    }
+
+    async getUpcomingInvoice(
+        customerId: string,
+    ): Promise<Stripe.UpcomingInvoice | null> {
+        try {
+            return await this.getStripeClient().invoices.retrieveUpcoming({
+                customer: customerId,
+            });
+        } catch {
+            return null;
+        }
+    }
+
+    async createBillingPortalSession(
+        customerId: string,
+        returnUrl: string,
+    ): Promise<string> {
+        try {
+            const session =
+                await this.getStripeClient().billingPortal.sessions.create({
+                    customer: customerId,
+                    return_url: returnUrl,
+                });
+            return session.url;
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Unknown error';
+            logger.error('Failed to create billing portal session', { error: message });
+            throw new InternalError('Failed to create billing portal session');
+        }
+    }
+
     /**
      * Get the Stripe client for advanced operations
      */

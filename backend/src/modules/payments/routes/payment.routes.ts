@@ -8,8 +8,12 @@ import {
     initiateCheckoutSchema,
     verifyPaymentSchema,
     cancelSubscriptionSchema,
+    pauseSubscriptionSchema,
+    resumeSubscriptionSchema,
+    portalSessionSchema,
     getSubscriptionHistorySchema,
     getPaymentHistorySchema,
+    couponRedeemSchema,
     redeemCouponSchema,
     previewUpgradeSchema,
     upgradeSubscriptionSchema,
@@ -149,6 +153,26 @@ router.get(
 
 registry.registerPath({
     method: 'get',
+    path: '/payments/subscription/entitlements',
+    summary: 'Get subscription entitlements',
+    description:
+        'Single source of truth for what this user can do right now. Mobile reads on cold start and after payment events.',
+    tags: ['Payments - Subscription'],
+    security: [{ bearerAuth: [] }],
+    responses: {
+        200: { description: 'Entitlements retrieved' },
+        401: { description: 'Unauthorized' },
+    },
+});
+
+router.get(
+    '/subscription/entitlements',
+    authMiddleware,
+    asyncHandler(PaymentController.getEntitlements),
+);
+
+registry.registerPath({
+    method: 'get',
     path: '/payments/subscription/history',
     summary: 'Get Subscription History',
     description: "Retrieve user's subscription history with pagination",
@@ -211,6 +235,126 @@ router.post(
     validator(cancelSubscriptionSchema, ValidationSource.BODY),
     asyncHandler(PaymentController.cancelSubscription),
 );
+
+// ============ Subscription Pause / Resume ============
+
+registry.registerPath({
+    method: 'post',
+    path: '/payments/subscription/pause',
+    summary: 'Pause Subscription',
+    description:
+        'Pause an active Stripe subscription. Collection is voided and resumes after the pause period.',
+    tags: ['Payments - Subscription'],
+    security: [{ bearerAuth: [] }],
+    request: {
+        body: {
+            content: {
+                'application/json': {
+                    schema: pauseSubscriptionSchema,
+                },
+            },
+        },
+    },
+    responses: {
+        200: { description: 'Subscription paused' },
+        400: { description: 'Invalid subscription or not eligible for pause' },
+        401: { description: 'Unauthorized' },
+    },
+});
+
+router.post(
+    '/subscription/pause',
+    authMiddleware,
+    validator(pauseSubscriptionSchema, ValidationSource.BODY),
+    asyncHandler(PaymentController.pauseSubscription),
+);
+
+registry.registerPath({
+    method: 'post',
+    path: '/payments/subscription/resume',
+    summary: 'Resume Subscription',
+    description: 'Resume a paused Stripe subscription immediately.',
+    tags: ['Payments - Subscription'],
+    security: [{ bearerAuth: [] }],
+    request: {
+        body: {
+            content: {
+                'application/json': {
+                    schema: resumeSubscriptionSchema,
+                },
+            },
+        },
+    },
+    responses: {
+        200: { description: 'Subscription resumed' },
+        400: { description: 'Invalid subscription or not paused' },
+        401: { description: 'Unauthorized' },
+    },
+});
+
+router.post(
+    '/subscription/resume',
+    authMiddleware,
+    validator(resumeSubscriptionSchema, ValidationSource.BODY),
+    asyncHandler(PaymentController.resumeSubscription),
+);
+
+// ============ Upcoming Charge ============
+
+registry.registerPath({
+    method: 'get',
+    path: '/payments/subscription/upcoming-charge',
+    summary: 'Get Upcoming Charge',
+    description:
+        "Preview the next invoice amount and date for the user's active Stripe subscription.",
+    tags: ['Payments - Subscription'],
+    security: [{ bearerAuth: [] }],
+    responses: {
+        200: { description: 'Upcoming charge retrieved (null if none)' },
+        401: { description: 'Unauthorized' },
+    },
+});
+
+router.get(
+    '/subscription/upcoming-charge',
+    authMiddleware,
+    asyncHandler(PaymentController.getUpcomingCharge),
+);
+
+// ============ Billing Portal ============
+
+registry.registerPath({
+    method: 'post',
+    path: '/payments/checkout/portal',
+    summary: 'Create Billing Portal Session',
+    description:
+        'Generate a Stripe billing portal URL where the user can manage payment methods, view invoices, and cancel.',
+    tags: ['Payments - Checkout'],
+    security: [{ bearerAuth: [] }],
+    request: {
+        body: {
+            content: {
+                'application/json': {
+                    schema: portalSessionSchema,
+                },
+            },
+        },
+    },
+    responses: {
+        200: { description: 'Portal session URL returned' },
+        400: { description: 'No Stripe subscription found' },
+        401: { description: 'Unauthorized' },
+    },
+});
+
+router.post(
+    '/checkout/portal',
+    authMiddleware,
+    validator(portalSessionSchema, ValidationSource.BODY),
+    asyncHandler(PaymentController.createPortalSession),
+);
+
+// ============ Subscription Upgrade ============
 
 registry.registerPath({
     method: 'post',
@@ -319,37 +463,37 @@ router.get(
     asyncHandler(PaymentController.getPaymentHistory),
 );
 
-// ============ Coupon ============
+// ============ Coupon Redeem ============
 
 registry.registerPath({
     method: 'post',
     path: '/payments/coupon/redeem',
-    summary: 'Redeem Static Coupon Code',
+    summary: 'Redeem a coupon',
     description:
-        'Redeem launch coupon code for temporary free subscription access without payment',
-    tags: ['Payments - Coupon'],
-    security: [{ bearerAuth: [] }],
+        'Redeem a coupon on the active subscription. For extension_days coupons, extends currentPeriodEnd.',
+    tags: ['Payments - Coupons'],
+    security: [{ bearerAuth: [], apiKey: [] }],
     request: {
         body: {
             content: {
                 'application/json': {
-                    schema: redeemCouponSchema,
+                    schema: couponRedeemSchema,
                 },
             },
         },
     },
     responses: {
-        200: { description: 'Coupon redeemed successfully' },
-        400: { description: 'Invalid coupon or coupon disabled' },
-        401: { description: 'Unauthorized' },
+        200: { description: 'Coupon redeemed' },
+        400: { description: 'Invalid coupon or no active subscription' },
+        401: { description: 'Authentication required' },
     },
 });
 
 router.post(
     '/coupon/redeem',
     authMiddleware,
-    validator(redeemCouponSchema, ValidationSource.BODY),
-    asyncHandler(PaymentController.redeemCoupon),
+    validator(couponRedeemSchema, ValidationSource.BODY),
+    asyncHandler(PaymentController.redeemCouponCode),
 );
 
 // ============ Webhooks ============
@@ -358,3 +502,29 @@ router.post(
 // Razorpay webhook (handled separately in webhook routes)
 
 export const paymentRoutes = router;
+
+// ============ Coupon Routes (mounted at /coupons) ============
+
+const couponRouter = Router();
+
+registry.registerPath({
+    method: 'get',
+    path: '/coupons/{code}/validate',
+    summary: 'Validate a coupon code',
+    description:
+        'Pre-flight validation — does not redeem. Always returns 200; check `valid` field.',
+    tags: ['Payments - Coupons'],
+    security: [{ bearerAuth: [], apiKey: [] }],
+    responses: {
+        200: { description: 'Validation result' },
+        401: { description: 'Authentication required' },
+    },
+});
+
+couponRouter.get(
+    '/:code/validate',
+    authMiddleware,
+    asyncHandler(PaymentController.validateCouponCode),
+);
+
+export const couponRoutes = couponRouter;

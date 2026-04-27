@@ -7,6 +7,8 @@ import {
 import {
     subscriptionService,
     paymentService,
+    validateCoupon,
+    redeemCoupon,
 } from '../services/payment.service';
 import {
     InitiateCheckoutInput,
@@ -14,6 +16,10 @@ import {
     CancelSubscriptionInput,
     GetSubscriptionHistoryInput,
     GetPaymentHistoryInput,
+    CouponRedeemInput,
+    PauseSubscriptionInput,
+    ResumeSubscriptionInput,
+    PortalSessionInput,
     RedeemCouponInput,
     PreviewUpgradeInput,
     UpgradeSubscriptionInput,
@@ -181,17 +187,92 @@ export async function getPaymentHistory(
 }
 
 /**
- * Redeem static launch coupon
- * POST /payments/coupon/redeem
+ * Get subscription entitlements (single source of truth)
+ * GET /payments/subscription/entitlements
  */
-export async function redeemCoupon(
+export async function getEntitlements(
     req: ProtectedRequest,
     res: Response,
 ): Promise<void> {
-    const body = req.body as RedeemCouponInput;
-    const result = await subscriptionService.redeemCoupon(req.user!.id, body);
+    const result = await subscriptionService.getEntitlements(req.user.id);
+    new SuccessResponse('Entitlements retrieved', result).send(res);
+}
 
-    new SuccessResponse(result.message, result.data).send(res);
+/**
+ * Validate a coupon code (pre-flight, no redemption)
+ * GET /coupons/:code/validate
+ */
+export async function validateCouponCode(
+    req: ProtectedRequest,
+    res: Response,
+): Promise<void> {
+    const code = req.params.code;
+    const result = await validateCoupon(code, req.user.id);
+    new SuccessResponse('Coupon validation result', result).send(res);
+}
+
+/**
+ * Redeem a coupon on the active subscription
+ * POST /payments/coupon/redeem
+ */
+export async function redeemCouponCode(
+    req: ProtectedRequest,
+    res: Response,
+): Promise<void> {
+    const { code } = req.body as CouponRedeemInput;
+    const result = await redeemCoupon(code, req.user.id);
+    new SuccessResponse('Coupon redeemed', result).send(res);
+}
+
+/**
+ * Pause subscription
+ * POST /payments/subscription/pause
+ */
+export async function pauseSubscription(
+    req: ProtectedRequest,
+    res: Response,
+): Promise<void> {
+    const body = req.body as PauseSubscriptionInput;
+    const result = await subscriptionService.pauseSubscription(req.user!.id, body);
+    new SuccessResponse('Subscription paused', result).send(res);
+}
+
+/**
+ * Resume subscription
+ * POST /payments/subscription/resume
+ */
+export async function resumeSubscription(
+    req: ProtectedRequest,
+    res: Response,
+): Promise<void> {
+    const body = req.body as ResumeSubscriptionInput;
+    const result = await subscriptionService.resumeSubscription(req.user!.id, body);
+    new SuccessResponse('Subscription resumed', result).send(res);
+}
+
+/**
+ * Get upcoming charge
+ * GET /payments/subscription/upcoming-charge
+ */
+export async function getUpcomingCharge(
+    req: ProtectedRequest,
+    res: Response,
+): Promise<void> {
+    const result = await subscriptionService.getUpcomingCharge(req.user!.id);
+    new SuccessResponse('Upcoming charge retrieved', result).send(res);
+}
+
+/**
+ * Create billing portal session
+ * POST /payments/checkout/portal
+ */
+export async function createPortalSession(
+    req: ProtectedRequest,
+    res: Response,
+): Promise<void> {
+    const body = req.body as PortalSessionInput;
+    const result = await subscriptionService.createPortalSession(req.user!.id, body);
+    new SuccessResponse('Portal session created', result).send(res);
 }
 
 /**

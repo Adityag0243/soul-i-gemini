@@ -1,0 +1,132 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Souli — Local Docker Compose (laptop/dev machine, no GPU needed)
+#
+# Services:
+#   souli-api    — FastAPI REST API (port 8000) — Gemini powered
+#   souli-dev    — Dev Streamlit UI (port 8502)
+#   souli-voice  — LiveKit voice worker
+#
+# NOT included locally (cloud services used instead):
+#   ollama  — not needed (Gemini handles everything)
+#   qdrant  — use Qdrant Cloud
+#   mongodb — use MongoDB Atlas
+#
+# Before first run:
+#   1. gcloud auth application-default login
+#   2. gcloud auth application-default set-quota-project YOUR_GCP_PROJECT_ID
+#   3. cp .env.example .env  → fill in your keys
+#   4. docker compose -f docker-compose.local.yml --env-file .env up -d
+# ─────────────────────────────────────────────────────────────────────────────
+
+version: "3.9"
+
+networks:
+  souli-local:
+    driver: bridge
+
+volumes:
+  souli-outputs-local:
+  souli-data-local:
+
+# ── Shared environment ────────────────────────────────────────────────────────
+x-local-env: &local-env
+  # Gemini (Vertex AI)
+  GCP_PROJECT_ID: ${GCP_PROJECT_ID}
+  GCP_LOCATION: ${GCP_LOCATION:-us-central1}
+  GOOGLE_APPLICATION_CREDENTIALS: /root/.config/gcloud/application_default_credentials.json
+  GEMINI_FLASH_MODEL: ${GEMINI_FLASH_MODEL:-gemini-3-flash-preview}
+  GEMINI_PRO_MODEL: ${GEMINI_PRO_MODEL:-gemini-3-pro-preview}
+  # MongoDB Atlas (cloud)
+  MONGODB_ATLAS_URI: ${MONGODB_ATLAS_URI}
+  MONGODB_DB_NAME: ${MONGODB_DB_NAME:-souli_benchmark}
+  # Qdrant Cloud
+  QDRANT_HOST: ${QDRANT_HOST}
+  QDRANT_PORT: ${QDRANT_PORT:-6333}
+  QDRANT_API_KEY: ${QDRANT_API_KEY}
+  QDRANT_COLLECTION: ${QDRANT_COLLECTION:-souli_chunks_improved}
+  # LiveKit Cloud
+  LIVEKIT_URL: ${LIVEKIT_URL}
+  LIVEKIT_API_KEY: ${LIVEKIT_API_KEY}
+  LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
+  # Deepgram STT
+  DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY}
+  # TTS
+  TTS_VOICE: ${TTS_VOICE:-en-IN-NeerjaNeural}
+  # Ollama (for energy tagger — optional locally)
+  OLLAMA_ENDPOINT: ${OLLAMA_ENDPOINT:-http://host.docker.internal:11434}
+  OLLAMA_TAGGER_MODEL: ${OLLAMA_TAGGER_MODEL:-qwen2.5:1.5b}
+  # Config
+  SOULI_CONFIG_PATH: /app/configs/pipeline.yaml
+  SOULI_LOG_LEVEL: ${SOULI_LOG_LEVEL:-INFO}
+  SOULI_OUTPUTS_DIR: /app/outputs
+  TRANSFORMERS_VERBOSITY: error
+
+# ── Shared volumes ─────────────────────────────────────────────────────────────
+x-local-volumes: &local-volumes
+  - souli-data-local:/app/data
+  - souli-outputs-local:/app/outputs
+  - ${GCLOUD_CONFIG_DIR:-~/.config/gcloud}:/root/.config/gcloud:ro
+
+services:
+
+  # ── FastAPI (port 8000) ────────────────────────────────────────────────────
+  souli-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.local
+    container_name: souli-api-local
+    restart: unless-stopped
+    networks:
+      - souli-local
+    volumes: *local-volumes
+    environment:
+      <<: *local-env
+    command: [
+      "uvicorn", "souli_pipeline.api:app",
+      "--host", "0.0.0.0",
+      "--port", "8000",
+      "--reload"
+    ]
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -f http://localhost:8000/health || exit 1" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # ── Dev Streamlit UI (port 8502) ──────────────────────────────────────────
+  souli-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.local
+    container_name: souli-dev-local
+    restart: unless-stopped
+    networks:
+      - souli-local
+    volumes: *local-volumes
+    environment:
+      <<: *local-env
+      SOULI_LOG_LEVEL: DEBUG
+    command: [
+      "streamlit", "run", "/app/souli_pipeline/streamlit_dev.py",
+      "--server.port=8502",
+      "--server.address=0.0.0.0"
+    ]
+    ports:
+      - "8502:8502"
+
+  # ── Voice Worker ──────────────────────────────────────────────────────────
+  souli-voice:
+    build:
+      context: .
+      dockerfile: Dockerfile.local
+    container_name: souli-voice-local
+    restart: unless-stopped
+    networks:
+      - souli-local
+    volumes: *local-volumes
+    environment:
+      <<: *local-env
+    command: [ "python", "-m", "souli_pipeline.voice.run_worker" ]

@@ -29,6 +29,7 @@ enum TokenType {
   REFRESH
   MAGIC_LINK
   RESET_PASSWORD
+  EMAIL_VERIFICATION
 }
 
 enum MessageRole {
@@ -45,10 +46,11 @@ enum CrisisLevel {
 }
 
 enum SubscriptionStatus {
-  FREE
   ACTIVE
-  CANCELED
+  INACTIVE
+  TRIALING
   EXPIRED
+  CANCELED
   PAST_DUE
 }
 
@@ -80,6 +82,12 @@ enum FeedbackType {
   WORSE
 }
 
+enum DevicePlatform {
+  IOS
+  ANDROID
+  WEB
+}
+
 enum FeatureKey {
   EXPERT_ESCALATION
   VOICE_INPUT
@@ -88,12 +96,37 @@ enum FeatureKey {
 //user and auth
 
 model User {
-  id       Int      @id @default(autoincrement())
+  id       Int     @id @default(autoincrement())
   name     String?
-  email    String?  @unique
+  email    String? @unique
   password String?
-  status   Boolean  @default(true)
-  verified Boolean  @default(false)
+  status   Boolean @default(true)
+  verified Boolean @default(false)
+
+  // Profile (Phase 3 — D3 canonical user shape)
+  callName       String?   @map("call_name") @db.VarChar(100)
+  avatarUrl      String?   @map("avatar_url") @db.Text
+  // ISO 3166-1 alpha-2 country code; IANA timezone; IETF BCP 47 locale.
+  country        String?   @db.VarChar(2)
+  timezone       String?   @db.VarChar(64)
+  locale         String?   @db.VarChar(10)
+  // DATE not TIMESTAMP — birthdays are timezone-agnostic.
+  dateOfBirth    DateTime? @map("date_of_birth") @db.Date
+  gender         String?   @db.VarChar(50)
+  // Default TTS voice the user prefers; AI service voice id.
+  preferredVoice String?   @map("preferred_voice") @db.VarChar(100)
+
+  // Notification opt-outs. Default ON — explicit opt-out model (D20).
+  pushNotificationsEnabled  Boolean @default(true) @map("push_notifications_enabled")
+  emailNotificationsEnabled Boolean @default(true) @map("email_notifications_enabled")
+
+  // Onboarding gate + activity tracking (insights / cron / churn).
+  onboardingCompleted Boolean   @default(false) @map("onboarding_completed")
+  lastActiveAt        DateTime? @map("last_active_at")
+
+  // Free-tier tracking (D12, D13).
+  freeSessionsCompleted Int     @default(0) @map("free_sessions_completed")
+  couponPopupShown      Boolean @default(false) @map("coupon_popup_shown")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
@@ -117,6 +150,11 @@ model User {
   referralsGiven    Referral[]         @relation("ReferrerRelation")
   referralsReceived Referral[]         @relation("ReferredRelation")
   analyticsEvents   AnalyticsEvent[]
+  deviceTokens      UserDeviceToken[]
+  mobileOtps        MobileOtp[]
+  couponRedemptions CouponRedemption[]
+  practiceSaves       UserPracticeSave[]
+  practiceAssignments PracticeAssignment[]
   notificationPreference UserNotificationPreference?
 
   @@index([email])
@@ -184,21 +222,21 @@ model Role {
 
 // Auth Identities - stores all login providers per user
 model AuthIdentity {
-  id     String       @id @default(uuid()) @db.Uuid
-  userId Int          @map("user_id")
+  id       String       @id @default(uuid()) @db.Uuid
+  userId   Int          @map("user_id")
   provider AuthProvider
 
   // email provider fields
-  email        String?
-  passwordHash String? @map("password_hash")
+  email         String?
+  passwordHash  String? @map("password_hash")
   emailVerified Boolean @default(false) @map("email_verified")
 
   // OAUTH provider fields (Google, Apple)
   providerAccountId String? @map("provider_account_id")
 
   // mobile provider fields (baad mein use karsakte hai)
-  mobileNumber   String?  @map("mobile_number") @db.VarChar(20)
-  mobileVerified Boolean  @default(false) @map("mobile_verified")
+  mobileNumber   String? @map("mobile_number") @db.VarChar(20)
+  mobileVerified Boolean @default(false) @map("mobile_verified")
 
   // anonymous provider fields
   souliKeyHash String? @map("souli_key_hash")
@@ -233,6 +271,61 @@ model AuthToken {
   @@map("auth_tokens")
 }
 
+// Mobile OTP records (Phase 4.3). Separate from AuthToken because a LOGIN-intent
+// OTP has no user yet (user is created on successful verify). requestId returned
+// from /send IS this row's id; /verify looks it up by id, validates the hash,
+// and (on login) materializes the user + MOBILE AuthIdentity. attemptCount caps
+// brute force at 5 wrong tries.
+enum MobileOtpIntent {
+  LOGIN
+  LINK
+}
+
+model MobileOtp {
+  id           String          @id @default(uuid()) @db.Uuid
+  mobileNumber String          @map("mobile_number") @db.VarChar(20)
+  tokenHash    String          @map("token_hash")
+  intent       MobileOtpIntent
+  // Set only for LINK intent (the authenticated user attaching the number).
+  // null for LOGIN intent.
+  userId       Int?            @map("user_id")
+  attemptCount Int             @default(0) @map("attempt_count")
+  expiresAt    DateTime        @map("expires_at")
+  revoked      Boolean         @default(false)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([mobileNumber, createdAt])
+  @@index([userId])
+  @@map("mobile_otps")
+}
+
+// Push notification device tokens.
+// Token is unique across users — if a device changes hands the upsert at
+// registration time re-points the row to the new userId. isActive=false on
+// explicit logout so we can prune stale rows later.
+model UserDeviceToken {
+  id          String         @id @default(uuid()) @db.Uuid
+  userId      Int            @map("user_id")
+  token       String         @unique @db.VarChar(512)
+  platform    DevicePlatform
+  appVersion  String?        @map("app_version") @db.VarChar(50)
+  deviceModel String?        @map("device_model") @db.VarChar(255)
+  isActive    Boolean        @default(true) @map("is_active")
+  lastSeenAt  DateTime?      @map("last_seen_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, isActive])
+  @@map("user_device_tokens")
+}
+
 // Keystore - JWT session management
 model Keystore {
   id           Int     @id @default(autoincrement())
@@ -240,6 +333,12 @@ model Keystore {
   primaryKey   String  @map("primary_key")
   secondaryKey String  @map("secondary_key")
   status       Boolean @default(true)
+
+  deviceName String? @map("device_name")
+  platform   String?
+  appVersion String? @map("app_version")
+  ipAddress  String? @map("ip_address")
+  lastSeenAt DateTime? @map("last_seen_at")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
@@ -270,17 +369,43 @@ model ApiKey {
 
 // chat systems
 model ChatSession {
-  id         String   @id @default(uuid()) @db.Uuid
-  userId     Int      @map("user_id")
-  title      String?  @db.VarChar(255)
-  isArchived Boolean  @default(false) @map("is_archived")
-  startedAt  DateTime @default(now()) @map("started_at")
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     Int       @map("user_id")
+  title      String?   @db.VarChar(255)
+  isArchived Boolean   @default(false) @map("is_archived")
+  startedAt  DateTime  @default(now()) @map("started_at")
   endedAt    DateTime? @map("ended_at")
   
   // Free session tracking
   phase      String?  @db.VarChar(100) // e.g., "solution_complete"
   turnCount  Int      @default(0) @map("turn_count")
   isComplete Boolean  @default(false) @map("is_complete")
+
+  // AI session-level state (mirrored from latest assistant message; updated by chat.service on every AI reply).
+  phase            String? @db.VarChar(50)
+  energyNode       String? @map("energy_node") @db.VarChar(50)
+  secondaryNode    String? @map("secondary_node") @db.VarChar(50)
+  commitmentStatus String? @map("commitment_status") @db.VarChar(50)
+  solutionStep     Int?    @map("solution_step")
+  solutionComplete Boolean @default(false) @map("solution_complete")
+
+  // Three-day task assigned by AI when solution_complete fires (Phase 13 webhook).
+  // JSON blob shape: { title, description, durationDays, ... } — kept flexible to track AI changes.
+  threeDayTask           Json?     @map("three_day_task")
+  threeDayTaskAssignedAt DateTime? @map("three_day_task_assigned_at")
+
+  // Activity tracking (used by Phase 9 cron auto-archive, Phase 11 insights).
+  lastActivityAt DateTime? @map("last_activity_at")
+
+  // Voice channel metadata. v1 is upload-based (D8); livekitRoomName is reserved for v1.1+.
+  channelType     String? @map("channel_type") @db.VarChar(20)
+  livekitRoomName String? @map("livekit_room_name") @db.VarChar(255)
+
+  // Aggregates and free-tier signals.
+  totalTokensUsed Int     @default(0) @map("total_tokens_used")
+  mood            String? @db.VarChar(50)
+  // Set true when user sends 3rd user message in this session (D12). Increments User.freeSessionsCompleted.
+  isComplete      Boolean @default(false) @map("is_complete")
 
   createdAt DateTime @default(now()) @map("created_at")
 
@@ -302,6 +427,23 @@ model ChatMessage {
   content     String      @db.Text
   tokenCount  Int?        @map("token_count")
   crisisLevel CrisisLevel @default(NONE) @map("crisis_level")
+
+  // AI metadata (set on ASSISTANT messages by chat.service when AI returns a reply).
+  // All nullable: USER messages and pre-existing rows leave them null.
+  // String (not enum) for phase/energyNode/secondaryNode so AI can add values without DB migration.
+  phase           String? @db.VarChar(50)
+  energyNode      String? @map("energy_node") @db.VarChar(50)
+  secondaryNode   String? @map("secondary_node") @db.VarChar(50)
+  nodeReasoning   String? @map("node_reasoning") @db.Text
+  turnCount       Int?    @map("turn_count")
+  solutionStep    Int?    @map("solution_step")
+  ragSources      Json?   @map("rag_sources")
+  detectedEmotion String? @map("detected_emotion") @db.VarChar(100)
+
+  // Voice metadata (set on USER messages that were transcribed from audio,
+  // and on ASSISTANT messages that have synthesized audio).
+  audioUrl   String? @map("audio_url") @db.Text
+  durationMs Int?    @map("duration_ms")
 
   createdAt DateTime @default(now()) @map("created_at")
 
@@ -365,16 +507,21 @@ model EmotionalState {
 }
 
 model DailyCheckin {
-  id         String  @id @default(uuid()) @db.Uuid
-  userId     Int     @map("user_id")
-  moodScore  Int     @map("mood_score")
-  energyWord String? @map("energy_word") @db.VarChar(100)
-  reflection String? @db.Text
+  id              String   @id @default(uuid()) @db.Uuid
+  userId          Int      @map("user_id")
+  date            DateTime @db.Date
+  moodScore       Int      @map("mood_score")
+  energyWord      String?  @map("energy_word") @db.VarChar(100)
+  reflection      String?  @db.Text
+  voiceReflection String?  @map("voice_reflection") @db.Text
+  audioUrl        String?  @map("audio_url") @db.VarChar(500)
 
   createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@unique([userId, date])
   @@index([userId])
   @@index([userId, createdAt])
   @@map("daily_checkins")
@@ -384,8 +531,11 @@ model DailyCheckin {
 
 model EnergyNode {
   id          String  @id @default(uuid()) @db.Uuid
+  slug        String  @unique @db.VarChar(50)
   title       String  @db.VarChar(255)
   description String? @db.Text
+  color       String? @db.VarChar(20)
+  icon        String? @db.VarChar(100)
   version     Int     @default(1)
   isActive    Boolean @default(true) @map("is_active")
 
@@ -402,6 +552,8 @@ model Practice {
   id              String  @id @default(uuid()) @db.Uuid
   energyNodeId    String? @map("energy_node_id") @db.Uuid
   title           String  @db.VarChar(255)
+  type            String? @db.VarChar(50)
+  description     String? @db.Text
   durationMinutes Int?    @map("duration_minutes")
   textScript      String? @map("text_script") @db.Text
   audioUrl        String? @map("audio_url") @db.Text
@@ -412,10 +564,13 @@ model Practice {
   createdAt DateTime @default(now()) @map("created_at")
 
   energyNode EnergyNode?        @relation(fields: [energyNodeId], references: [id], onDelete: SetNull)
-  feedbacks  PracticeFeedback[]
+  feedbacks    PracticeFeedback[]
+  saves        UserPracticeSave[]
+  assignments  PracticeAssignment[]
 
   @@index([energyNodeId])
   @@index([isActive])
+  @@index([type])
   @@map("practices")
 }
 
@@ -436,16 +591,48 @@ model PracticeFeedback {
   @@map("practice_feedbacks")
 }
 
+model UserPracticeSave {
+  id         String @id @default(uuid()) @db.Uuid
+  userId     Int    @map("user_id")
+  practiceId String @map("practice_id") @db.Uuid
+
+  savedAt DateTime @default(now()) @map("saved_at")
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  practice Practice @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, practiceId])
+  @@index([userId])
+  @@map("user_practice_saves")
+}
+
+model PracticeAssignment {
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     Int       @map("user_id")
+  practiceId String    @map("practice_id") @db.Uuid
+  assignedAt DateTime  @default(now()) @map("assigned_at")
+  dueDate    DateTime  @db.Date @map("due_date")
+  completedAt DateTime? @map("completed_at")
+  source     String?   @db.VarChar(50)
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  practice Practice @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, dueDate])
+  @@map("practice_assignments")
+}
+
 // SUBSCRIPTIONS
 
 model SubscriptionPlan {
-  id              String  @id @default(uuid()) @db.Uuid
-  name            String  @db.VarChar(100)
-  priceUsd        Decimal @map("price_usd") @db.Decimal(10, 2)
-  stripePriceId   String? @map("stripe_price_id") @db.VarChar(255)
-  razorpayPlanId  String? @map("razorpay_plan_id") @db.VarChar(255)
-  chatLimit       Int?    @map("chat_limit")
-  isActive        Boolean @default(true) @map("is_active")
+  id             String  @id @default(uuid()) @db.Uuid
+  name           String  @db.VarChar(100)
+  priceUsd       Decimal @map("price_usd") @db.Decimal(10, 2)
+  stripePriceId  String? @map("stripe_price_id") @db.VarChar(255)
+  razorpayPlanId String? @map("razorpay_plan_id") @db.VarChar(255)
+  chatLimit      Int?    @map("chat_limit")
+  isActive       Boolean @default(true) @map("is_active")
 
   createdAt DateTime @default(now()) @map("created_at")
 
@@ -460,7 +647,7 @@ model UserSubscription {
   planId                 String             @map("plan_id") @db.Uuid
   provider               PaymentProvider?
   providerSubscriptionId String?            @map("provider_subscription_id") @db.VarChar(255)
-  status                 SubscriptionStatus @default(FREE)
+  status                 SubscriptionStatus @default(INACTIVE)
   currentPeriodEnd       DateTime?          @map("current_period_end")
 
   createdAt DateTime @default(now()) @map("created_at")
@@ -492,6 +679,46 @@ model Payment {
   @@index([userId])
   @@index([provider, providerPaymentId])
   @@map("payments")
+}
+
+// COUPONS
+
+model Coupon {
+  id              String   @id @default(uuid()) @db.Uuid
+  code            String   @unique @db.VarChar(50)
+  discountType    String   @map("discount_type") @db.VarChar(20)
+  discountValue   Decimal  @map("discount_value") @db.Decimal(10, 2)
+  currency        String?  @db.VarChar(3)
+  validFrom       DateTime @map("valid_from")
+  validUntil      DateTime @map("valid_until")
+  maxRedemptions  Int?     @map("max_redemptions")
+  redemptionsCount Int     @default(0) @map("redemptions_count")
+  perUserLimit    Int      @default(1) @map("per_user_limit")
+  appliesToPlanIds String[] @default([]) @map("applies_to_plan_ids")
+  isActive        Boolean  @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  redemptions CouponRedemption[]
+
+  @@index([code])
+  @@index([isActive, validUntil])
+  @@map("coupons")
+}
+
+model CouponRedemption {
+  id         String   @id @default(uuid()) @db.Uuid
+  couponId   String   @map("coupon_id") @db.Uuid
+  userId     Int      @map("user_id")
+  redeemedAt DateTime @default(now()) @map("redeemed_at")
+
+  coupon Coupon @relation(fields: [couponId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([couponId, userId])
+  @@index([userId])
+  @@map("coupon_redemptions")
 }
 
 // CRISIS SYSTEM

@@ -155,7 +155,6 @@ class SouliVoiceAgent:
         greeting = engine.greeting()
         logger.info("[Voice] Greeting: %s", greeting[:80])
         await self._speak(greeting)
-
         # Keep agent alive
         await asyncio.sleep(3600)
     # ── Audio track handler (VAD + STT + LLM + TTS loop) ─────────────────────

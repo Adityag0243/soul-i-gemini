@@ -38,6 +38,9 @@ import {
     CancelSubscriptionInput,
     RedeemCouponInput,
     UpgradeSubscriptionInput,
+    PauseSubscriptionInput,
+    ResumeSubscriptionInput,
+    PortalSessionInput,
     PreviewUpgradeInput,
 } from '../schemas/payment.schema';
 import { paymentConfig } from '../../../config';
@@ -1051,7 +1054,7 @@ class SubscriptionService {
 
             if (!subscription) {
                 return {
-                    status: 'FREE',
+                    status: 'INACTIVE',
                     isActive: false,
                     remainingDays: 0,
                     willRenew: false,
@@ -1185,6 +1188,156 @@ class SubscriptionService {
             throw new InternalError('Failed to fetch subscription history');
         }
     }
+
+    async pauseSubscription(userId: number, input: PauseSubscriptionInput) {
+        const subscription = await subscriptionRepository.getSubscriptionById(input.subscriptionId);
+        if (subscription.userId !== userId) {
+            throw new BadRequestError('Unauthorized');
+        }
+        if (subscription.status !== 'ACTIVE') {
+            throw new BadRequestError('Only active subscriptions can be paused');
+        }
+        if (subscription.provider !== 'STRIPE' || !subscription.providerSubscriptionId) {
+            throw new BadRequestError('Pause is only supported for Stripe subscriptions');
+        }
+
+        const pauseDays = input.pausePeriodDays ?? 30;
+        const resumeAt = new Date(Date.now() + pauseDays * 24 * 60 * 60 * 1000);
+
+        await stripeGateway.pauseSubscription(subscription.providerSubscriptionId, resumeAt);
+
+        logger.info('Subscription paused', { subscriptionId: input.subscriptionId, userId, resumeAt });
+
+        return {
+            subscriptionId: input.subscriptionId,
+            status: 'paused',
+            resumeAt: resumeAt.toISOString(),
+        };
+    }
+
+    async resumeSubscription(userId: number, input: { subscriptionId: string }) {
+        const subscription = await subscriptionRepository.getSubscriptionById(input.subscriptionId);
+        if (subscription.userId !== userId) {
+            throw new BadRequestError('Unauthorized');
+        }
+        if (subscription.provider !== 'STRIPE' || !subscription.providerSubscriptionId) {
+            throw new BadRequestError('Resume is only supported for Stripe subscriptions');
+        }
+
+        await stripeGateway.resumeSubscription(subscription.providerSubscriptionId);
+
+        logger.info('Subscription resumed', { subscriptionId: input.subscriptionId, userId });
+
+        return {
+            subscriptionId: input.subscriptionId,
+            status: 'active',
+        };
+    }
+
+    async getUpcomingCharge(userId: number) {
+        const subscription = await subscriptionRepository.getActiveSubscriptionByUserId(userId);
+        if (!subscription || subscription.provider !== 'STRIPE' || !subscription.providerSubscriptionId) {
+            return { upcoming: null };
+        }
+
+        const stripeSub = await stripeGateway.getSubscription(subscription.providerSubscriptionId);
+        const customerId = typeof stripeSub.customer === 'string'
+            ? stripeSub.customer
+            : stripeSub.customer.id;
+
+        const invoice = await stripeGateway.getUpcomingInvoice(customerId);
+        if (!invoice) {
+            return { upcoming: null };
+        }
+
+        return {
+            upcoming: {
+                amountDue: invoice.amount_due / 100,
+                currency: invoice.currency,
+                nextPaymentDate: invoice.next_payment_attempt
+                    ? new Date(invoice.next_payment_attempt * 1000).toISOString()
+                    : null,
+                periodStart: invoice.period_start
+                    ? new Date(invoice.period_start * 1000).toISOString()
+                    : null,
+                periodEnd: invoice.period_end
+                    ? new Date(invoice.period_end * 1000).toISOString()
+                    : null,
+            },
+        };
+    }
+
+    async createPortalSession(userId: number, input: PortalSessionInput) {
+        const subscription = await subscriptionRepository.getActiveSubscriptionByUserId(userId);
+        if (!subscription || subscription.provider !== 'STRIPE' || !subscription.providerSubscriptionId) {
+            throw new BadRequestError('No active Stripe subscription found');
+        }
+
+        const stripeSub = await stripeGateway.getSubscription(subscription.providerSubscriptionId);
+        const customerId = typeof stripeSub.customer === 'string'
+            ? stripeSub.customer
+            : stripeSub.customer.id;
+
+        const url = await stripeGateway.createBillingPortalSession(
+            customerId,
+            input.returnUrl,
+        );
+
+        return { url };
+    }
+
+    async getEntitlements(userId: number) {
+        const subscription =
+            await subscriptionRepository.getActiveSubscriptionByUserId(userId);
+
+        const user = await prisma.user.findUniqueOrThrow({
+            where: { id: userId },
+        });
+
+        const isActive =
+            !!subscription &&
+            (subscription.status === 'ACTIVE' ||
+                subscription.status === 'TRIALING') &&
+            !!subscription.currentPeriodEnd &&
+            subscription.currentPeriodEnd > new Date();
+
+        const isTrialing =
+            isActive && subscription?.status === 'TRIALING';
+
+        const hasPaid = isActive;
+        const blocked =
+            user.freeSessionsCompleted >= 3 && !hasPaid;
+
+        return {
+            isActive,
+            isTrialing,
+            plan: subscription
+                ? {
+                      id: subscription.planId,
+                      name: (subscription as any).plan?.name ?? null,
+                      priceUsd: (subscription as any).plan?.priceUsd
+                          ? Number((subscription as any).plan.priceUsd)
+                          : null,
+                  }
+                : null,
+            currentPeriodEnd:
+                subscription?.currentPeriodEnd?.toISOString() ?? null,
+            features: {
+                unlimitedChats: isActive,
+                voiceTranscription: isActive,
+                voiceSynthesis: isActive,
+                insightsExtended: isActive,
+            },
+            freeTier: {
+                used: user.freeSessionsCompleted,
+                total: 3,
+                blocked,
+                showCouponPopup:
+                    user.freeSessionsCompleted >= 3 &&
+                    !user.couponPopupShown,
+            },
+        };
+    }
 }
 
 /**
@@ -1250,3 +1403,111 @@ class PaymentService {
 
 export const subscriptionService = new SubscriptionService();
 export const paymentService = new PaymentService();
+
+// ============ Coupon Service ============
+
+export async function validateCoupon(code: string, userId: number) {
+    const coupon = await prisma.coupon.findUnique({
+        where: { code: code.toUpperCase() },
+    });
+
+    if (!coupon || !coupon.isActive) {
+        return { valid: false, reason: 'EXPIRED' };
+    }
+
+    const now = new Date();
+    if (now < coupon.validFrom || now > coupon.validUntil) {
+        return { valid: false, reason: 'EXPIRED' };
+    }
+
+    if (coupon.maxRedemptions !== null && coupon.redemptionsCount >= coupon.maxRedemptions) {
+        return { valid: false, reason: 'MAX_REDEMPTIONS_REACHED' };
+    }
+
+    const userRedemptions = await prisma.couponRedemption.count({
+        where: { couponId: coupon.id, userId },
+    });
+    if (userRedemptions >= coupon.perUserLimit) {
+        return { valid: false, reason: 'ALREADY_REDEEMED' };
+    }
+
+    return {
+        valid: true,
+        coupon: {
+            code: coupon.code,
+            discountType: coupon.discountType,
+            discountValue: Number(coupon.discountValue),
+            currency: coupon.currency,
+            validFrom: coupon.validFrom.toISOString(),
+            validUntil: coupon.validUntil.toISOString(),
+            maxRedemptions: coupon.maxRedemptions,
+            redemptionsCount: coupon.redemptionsCount,
+            perUserLimit: coupon.perUserLimit,
+            appliesToPlanIds: coupon.appliesToPlanIds,
+            isActive: coupon.isActive,
+        },
+        discount: {
+            type: coupon.discountType,
+            amount: Number(coupon.discountValue),
+            appliedTo: 'first_invoice',
+        },
+        appliesToCurrentUser: true,
+    };
+}
+
+export async function redeemCoupon(code: string, userId: number) {
+    const validation = await validateCoupon(code, userId);
+    if (!validation.valid) {
+        throw new BadRequestError(`Coupon invalid: ${validation.reason}`);
+    }
+
+    const subscription = await subscriptionRepository.getActiveSubscriptionByUserId(userId);
+    if (!subscription) {
+        throw new BadRequestError('No active subscription to apply coupon to');
+    }
+
+    const coupon = await prisma.coupon.findUniqueOrThrow({
+        where: { code: code.toUpperCase() },
+    });
+
+    const redemption = await prisma.$transaction(async (tx) => {
+        const r = await tx.couponRedemption.create({
+            data: { couponId: coupon.id, userId },
+        });
+
+        await tx.coupon.update({
+            where: { id: coupon.id },
+            data: { redemptionsCount: { increment: 1 } },
+        });
+
+        if (coupon.discountType === 'extension_days' && subscription.currentPeriodEnd) {
+            const newEnd = new Date(subscription.currentPeriodEnd);
+            newEnd.setDate(newEnd.getDate() + Number(coupon.discountValue));
+            await tx.userSubscription.update({
+                where: { id: subscription.id },
+                data: { currentPeriodEnd: newEnd },
+            });
+        }
+
+        return r;
+    });
+
+    const updatedSub = await prisma.userSubscription.findUniqueOrThrow({
+        where: { id: subscription.id },
+        include: { plan: true },
+    });
+
+    return {
+        redemption: {
+            id: redemption.id,
+            code: coupon.code,
+            discount: {
+                type: coupon.discountType,
+                amount: Number(coupon.discountValue),
+            },
+            appliedAt: redemption.redeemedAt.toISOString(),
+            newPeriodEnd: updatedSub.currentPeriodEnd?.toISOString() ?? null,
+        },
+        subscription: updatedSub,
+    };
+}

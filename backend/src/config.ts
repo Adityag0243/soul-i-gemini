@@ -65,12 +65,23 @@ export const googleConfig = {
     callbackUrl: process.env.CALLBACK_URL || '',
 };
 
+// Sign in with Apple configuration. The identity-token verifier checks that
+// `aud` matches one of the allowed audiences. APPLE_BUNDLE_ID is the iOS bundle
+// id (mobile native flow); APPLE_SERVICE_ID is the Service ID for the web flow,
+// optional. Q8 (Apple Developer team access) is required to obtain these — the
+// verifier hard-fails when neither is set.
+export const appleConfig = {
+    bundleId: process.env.APPLE_BUNDLE_ID || '',
+    serviceId: process.env.APPLE_SERVICE_ID || '',
+};
+
 // AI Service Configuration (GCP Ollama)
 export const aiServiceConfig = {
     serviceUrl: process.env.AI_SERVICE_URL || 'http://localhost:11434',
     model: process.env.AI_MODEL || 'llama3.2',
     maxTokens: parseInt(process.env.AI_MAX_TOKENS || '2048'),
     temperature: parseFloat(process.env.AI_TEMPERATURE || '0.7'),
+    internalApiKey: process.env.AI_INTERNAL_API_KEY || '',
 };
 
 // LiveKit Voice Configuration
@@ -126,10 +137,13 @@ export const paymentConfig = {
     ),
 };
 
-// configure SES for export (backward compatibility)
+// S3 / CDN configuration (avatars, voice audio, practice media). Bucket and
+// CDN base URL are provisioned by Phase 16.1; the endpoint code throws a
+// clear runtime error if AWS credentials/bucket are missing.
 export const configS3 = {
     awsRegion: process.env.AWS_REGION || 'ap-south-1',
     awsAccessKeyId: process.env.AWS_ACCESS_KEY_ID || '',
     awsSecretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || '',
-    bucketName: process.env.AWS_S3_BUCKET || '',
+    bucket: process.env.S3_BUCKET || process.env.AWS_S3_BUCKET || '',
+    cdnBaseUrl: (process.env.CDN_BASE_URL || '').replace(/\/$/, ''),
 };

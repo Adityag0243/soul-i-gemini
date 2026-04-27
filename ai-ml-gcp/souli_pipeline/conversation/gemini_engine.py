@@ -183,23 +183,24 @@ class GeminiEngine:
 
     # ── Public: Greeting ──────────────────────────────────────────────────────
 
-    def greeting(self) -> str:
+    def greeting(self, user_name: Optional[str] = None) -> str:
         """
-        Return the opening greeting.
+        Return the opening greeting, optionally personalized with the user's name.
         Called before any user message (same as ConversationEngine.greeting()).
         """
         if self.state is None:
             self.new_session()
-        opening_texts=[
-            "Hi, I'm Souli. I'm here with you. How are you feeling right now?",
-            "Hii, I'm Souli. I'm here to listen. What brings you here today and how are you feeling?",
-            "Hello, I'm Souli. I'm here to support you. What's on your mind today?",
-            "Hi there, I'm Souli. I'm here to listen. How's your energy feeling right now?",
-            "Hello, I'm Souli. I'm here with you. What are you noticing in yourself right now?",
-            "Hi, I'm Souli. I'm here to sit with you. How are you feeling right now?",
-            "hi, I'm Souli. I'm here to listen. How is your day going and how are you feeling right now?",
+
+        name = (user_name or "").strip() or "buddy"
+        opening_texts = [
+            f"Hi {name}, I'm Souli. I'm here with you. How are you feeling right now?",
+            f"Hi {name}, I'm Souli. I'm here to listen. What brings you here today and how are you feeling?",
+            f"Hello {name}, I'm Souli. I'm here to support you. What's on your mind today?",
+            f"Hi there {name}, I'm Souli. I'm here to listen. How's your energy feeling right now?",
+            f"Hello {name}, I'm Souli. I'm here with you. What are you noticing in yourself right now?",
+            f"Hi {name}, I'm Souli. I'm here to sit with you. How are you feeling right now?",
+            f"Hi {name}, I'm Souli. I'm here to listen. How is your day going and how are you feeling right now?",
         ]
-        # text = "Hi, I'm Souli. I'm here with you. How's your energy feeling right now?"
         import random
         text = random.choice(opening_texts)
         self.state.messages.append({"role": "assistant", "content": text})
