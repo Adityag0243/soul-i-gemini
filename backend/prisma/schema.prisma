@@ -445,8 +445,11 @@ model DailyCheckin {
 
 model EnergyNode {
   id          String  @id @default(uuid()) @db.Uuid
+  slug        String  @unique @db.VarChar(50)
   title       String  @db.VarChar(255)
   description String? @db.Text
+  color       String? @db.VarChar(20)
+  icon        String? @db.VarChar(100)
   version     Int     @default(1)
   isActive    Boolean @default(true) @map("is_active")
 
@@ -463,6 +466,8 @@ model Practice {
   id              String  @id @default(uuid()) @db.Uuid
   energyNodeId    String? @map("energy_node_id") @db.Uuid
   title           String  @db.VarChar(255)
+  type            String? @db.VarChar(50)
+  description     String? @db.Text
   durationMinutes Int?    @map("duration_minutes")
   textScript      String? @map("text_script") @db.Text
   audioUrl        String? @map("audio_url") @db.Text
@@ -477,6 +482,7 @@ model Practice {
 
   @@index([energyNodeId])
   @@index([isActive])
+  @@index([type])
   @@map("practices")
 }
 
