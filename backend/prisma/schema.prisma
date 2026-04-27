@@ -421,16 +421,21 @@ model EmotionalState {
 }
 
 model DailyCheckin {
-  id         String  @id @default(uuid()) @db.Uuid
-  userId     Int     @map("user_id")
-  moodScore  Int     @map("mood_score")
-  energyWord String? @map("energy_word") @db.VarChar(100)
-  reflection String? @db.Text
+  id              String   @id @default(uuid()) @db.Uuid
+  userId          Int      @map("user_id")
+  date            DateTime @db.Date
+  moodScore       Int      @map("mood_score")
+  energyWord      String?  @map("energy_word") @db.VarChar(100)
+  reflection      String?  @db.Text
+  voiceReflection String?  @map("voice_reflection") @db.Text
+  audioUrl        String?  @map("audio_url") @db.VarChar(500)
 
   createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@unique([userId, date])
   @@index([userId])
   @@index([userId, createdAt])
   @@map("daily_checkins")
