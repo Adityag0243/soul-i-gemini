@@ -4,6 +4,7 @@ import {
     ChatSession,
     ChatMessage,
     Prisma,
+    FeatureKey,
 } from '@prisma/client';
 import { prisma } from '../../../database';
 import {
@@ -16,6 +17,7 @@ import { subscriptionRepository } from '../../../database/repositories/subscript
 import ChatSessionRepo from '../repositories/chat-session.repo';
 import ChatMessageRepo from '../repositories/chat-message.repo';
 import AIService, { SouliSessionState, StreamEvent } from './ai.service';
+import FeatureControlService from '../../admin-panel/featureControl/services/feature-control.service';
 import {
     ChatSessionDto,
     ChatMessageDto,
@@ -25,6 +27,8 @@ import {
     SaveVoiceTranscriptResponseDto,
     SessionListResponseDto,
     MessageListResponseDto,
+    FreeSessionStatusDto,
+    SessionCompletionDto,
 } from '../dto/chat.dto';
 import {
     CreateSessionInput,

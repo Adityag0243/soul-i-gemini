@@ -47,8 +47,9 @@ def _download_audio(url: str, out_path: str) -> bool:
 
     cmd = [
         "yt-dlp",
-        "--js-runtimes", "node",  
+        "--js-runtimes", "node",
         "--remote-components", "ejs:github",
+        "--extractor-args", "youtube:player_client=web",
         "-f", "bestaudio/best",
         "--no-playlist",
         "-o", out_path,

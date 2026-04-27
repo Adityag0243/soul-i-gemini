@@ -241,3 +241,22 @@ api-test-gcp:
 	  --format="get(networkInterfaces[0].accessConfigs[0].natIP)"))
 	@echo "Testing API at http://$(VM_IP):8000"
 	curl -s http://$(VM_IP):8000/health | python3 -m json.tool
+# ── AWS Wake-up (run after every EC2 start) ─────────────────────────────────
+aws-wake:
+	@echo "▶ Starting Souli stack..."
+	docker compose -f $(COMPOSE_FILE) --env-file .env up -d --build
+	@echo "▶ Waiting for Ollama..."
+	@for i in $$(seq 1 30); do \
+	  if docker compose -f $(COMPOSE_FILE) exec -T ollama bash -c 'echo > /dev/tcp/localhost/11434' 2>/dev/null; then \
+	    echo "  ✓ Ollama ready"; break; \
+	  fi; \
+	  echo "  waiting... ($$i/30)"; sleep 3; \
+	done
+	@echo "▶ Ensuring models..."
+	@docker compose -f $(COMPOSE_FILE) exec -T ollama ollama list 2>/dev/null | grep -q "llama3.1" \
+	  || docker compose -f $(COMPOSE_FILE) exec -T ollama ollama pull llama3.1
+	@docker compose -f $(COMPOSE_FILE) exec -T ollama ollama list 2>/dev/null | grep -q "qwen2.5:1.5b" \
+	  || docker compose -f $(COMPOSE_FILE) exec -T ollama ollama pull qwen2.5:1.5b
+	@echo "▶ Status:"
+	@docker compose -f $(COMPOSE_FILE) ps
+	@echo "✓ Ready! API: http://localhost:8000  UI: http://localhost:8501"

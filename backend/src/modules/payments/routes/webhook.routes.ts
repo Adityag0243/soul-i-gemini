@@ -13,6 +13,60 @@ import {
 import { prisma } from '../../../database';
 import logger from '../../../core/logger';
 
+function logStripeUpgradeTrace(eventType: string, payload: any): void {
+    const subscriptionId = payload?.subscription || payload?.id;
+    const invoiceId = payload?.id;
+    const paymentIntentId = payload?.payment_intent;
+    const chargeId = payload?.charge;
+    const billingReason = payload?.billing_reason;
+
+    const isUpgradeEvent =
+        billingReason === 'subscription_update' ||
+        eventType === 'customer.subscription.updated';
+
+    if (!isUpgradeEvent) {
+        return;
+    }
+
+    logger.info('Stripe upgrade trace', {
+        eventType,
+        billingReason,
+        subscriptionId,
+        invoiceId,
+        paymentIntentId,
+        chargeId,
+    });
+}
+
+function logRazorpayUpgradeTrace(eventType: string, payload: any): void {
+    const entity = payload?.entity || payload;
+    const notes = entity?.notes || {};
+
+    const action = notes?.action;
+    const upgradeFromSubscriptionId = notes?.upgradeFromSubscriptionId;
+    const newPlanId = notes?.planId;
+    const orderId = entity?.order_id || entity?.id;
+    const paymentId = entity?.id;
+
+    const isUpgradeEvent =
+        action === 'subscription_upgrade' || !!upgradeFromSubscriptionId;
+
+    if (!isUpgradeEvent) {
+        return;
+    }
+
+    logger.info('Razorpay upgrade trace', {
+        eventType,
+        action,
+        orderId,
+        paymentId,
+        upgradeFromSubscriptionId,
+        newPlanId,
+        prorationAmountPaise: notes?.prorationAmountPaise,
+        idempotencyKey: notes?.idempotencyKey,
+    });
+}
+
 /**
  * Stripe Webhook Handler
  */
@@ -78,6 +132,8 @@ async function handleStripeSubscriptionUpdated(
     subscription: any,
 ): Promise<void> {
     try {
+        logStripeUpgradeTrace('customer.subscription.updated', subscription);
+
         const providerSubscriptionId = subscription.id;
         const userSubscription =
             await subscriptionRepository.getSubscriptionByProviderSubscriptionId(
@@ -170,8 +226,14 @@ async function handleStripeChargeFailed(charge: any): Promise<void> {
  */
 async function handleStripePaymentSucceeded(invoice: any): Promise<void> {
     try {
+        logStripeUpgradeTrace('invoice.payment_succeeded', invoice);
+
         logger.info('Stripe payment succeeded', {
             invoiceId: invoice.id,
+            subscriptionId: invoice.subscription,
+            paymentIntentId: invoice.payment_intent,
+            chargeId: invoice.charge,
+            billingReason: invoice.billing_reason,
         });
         // Handle as needed
     } catch (error) {
@@ -186,8 +248,14 @@ async function handleStripePaymentSucceeded(invoice: any): Promise<void> {
  */
 async function handleStripePaymentFailed(invoice: any): Promise<void> {
     try {
+        logStripeUpgradeTrace('invoice.payment_failed', invoice);
+
         logger.warn('Stripe payment failed', {
             invoiceId: invoice.id,
+            subscriptionId: invoice.subscription,
+            paymentIntentId: invoice.payment_intent,
+            chargeId: invoice.charge,
+            billingReason: invoice.billing_reason,
         });
         // Handle as needed
     } catch (error) {
@@ -424,9 +492,12 @@ async function handleRazorpaySubscriptionCancelled(
  */
 async function handleRazorpayPaymentFailed(payment: any): Promise<void> {
     try {
+        logRazorpayUpgradeTrace('payment.failed', payment);
+
         logger.warn('Razorpay payment failed', {
             paymentId: payment.id,
             error: payment.error_code,
+            orderId: payment.order_id,
         });
         // Send notification to user
     } catch (error) {
@@ -441,8 +512,11 @@ async function handleRazorpayPaymentFailed(payment: any): Promise<void> {
  */
 async function handleRazorpayPaymentAuthorized(payment: any): Promise<void> {
     try {
+        logRazorpayUpgradeTrace('payment.authorized', payment);
+
         logger.info('Razorpay payment authorized', {
             paymentId: payment.id,
+            orderId: payment.order_id,
         });
         // Handle as needed
     } catch (error) {

@@ -12,17 +12,22 @@ It is rewriting messy spoken transcript into clean, readable prose that:
 
 Has retry logic — if LLM output is too short or malformed, retries once
 with a stricter prompt.
+
+CHANGE: clean_all_segments() now runs chunks in PARALLEL using ThreadPoolExecutor.
+        No new libraries needed — ThreadPoolExecutor is built into Python.
+        Control parallel level with max_workers (default 4).
 """
 from __future__ import annotations
 
 import logging
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Prompts
+# Prompts  (unchanged)
 # ---------------------------------------------------------------------------
 
 _SYSTEM_PROMPT = """\
@@ -67,12 +72,11 @@ Output:"""
 
 
 # ---------------------------------------------------------------------------
-# Validation
+# Validation  (unchanged)
 # ---------------------------------------------------------------------------
 
 def _is_valid_output(original: str, cleaned: str, min_retention: float = 0.55) -> bool:
     """
-    Check that cleaned output is not too short (LLM over-summarised).
     Returns True if output retains at least min_retention fraction of word count.
     """
     if not cleaned or not cleaned.strip():
@@ -94,20 +98,18 @@ def _is_valid_output(original: str, cleaned: str, min_retention: float = 0.55) -
 def _postprocess(text: str) -> str:
     """Final cleanup of LLM output — remove any preamble lines it might add."""
     t = text.strip()
-    # Remove lines like "Cleaned transcript:", "Here is the cleaned version:", etc.
     preamble_re = re.compile(
         r"^(cleaned transcript|here is|here's|output|result)[:\s].*\n?",
         re.IGNORECASE | re.MULTILINE,
     )
     t = preamble_re.sub("", t).strip()
-    # Normalise whitespace
     t = re.sub(r"\n{3,}", "\n\n", t)
     t = re.sub(r" {2,}", " ", t)
     return t.strip()
 
 
 # ---------------------------------------------------------------------------
-# Main cleaning function
+# Single segment cleaning  (unchanged)
 # ---------------------------------------------------------------------------
 
 def clean_segment(
@@ -119,16 +121,7 @@ def clean_segment(
 ) -> str:
     """
     Clean a single transcript segment using llama3.1.
-
-    Returns the cleaned text.
     Falls back to light regex cleaning if Ollama is unavailable.
-
-    Args:
-        text:             Raw transcript segment (300-600 words typically)
-        ollama_model:     Ollama model name
-        ollama_endpoint:  Ollama server URL
-        num_ctx:          Context window (8192 recommended for improved pipeline)
-        temperature:      Lower = more conservative / faithful cleaning
     """
     text = (text or "").strip()
     if not text:
@@ -150,7 +143,7 @@ def clean_segment(
             return _regex_clean_fallback(text)
 
         # First attempt
-        prompt = _USER_PROMPT.format(text=text[:4000])  # cap input to stay within context
+        prompt = _USER_PROMPT.format(text=text[:4000])
         cleaned = llm.generate(prompt=prompt, system=_SYSTEM_PROMPT, temperature=temperature)
         cleaned = _postprocess(cleaned)
 
@@ -165,7 +158,6 @@ def clean_segment(
             )
             cleaned = _postprocess(cleaned)
 
-            # If still bad, fall back to regex
             if not _is_valid_output(text, cleaned, min_retention=0.4):
                 logger.warning("LLM cleaning still inadequate — using regex fallback.")
                 return _regex_clean_fallback(text)
@@ -178,25 +170,17 @@ def clean_segment(
 
 
 def _regex_clean_fallback(text: str) -> str:
-    """
-    Light regex-based cleaning when Ollama is unavailable.
-    Removes obvious fillers and repeated phrases only.
-    """
-    import re
+    """Light regex-based cleaning when Ollama is unavailable."""
     t = text
-    # Remove noise tokens
     t = re.sub(r"\[.*?\]|\(.*?\)", " ", t)
-    # Remove filler words
     t = re.sub(r"\b(uh+|um+|hmm+|hm+|ah+|you know,?\s*)\b", " ", t, flags=re.IGNORECASE)
-    # Remove simple word repetitions "the the", "and and"
     t = re.sub(r"\b(\w+)\s+\1\b", r"\1", t, flags=re.IGNORECASE)
-    # Normalise whitespace
     t = re.sub(r"\s+", " ", t).strip()
     return t
 
 
 # ---------------------------------------------------------------------------
-# Batch cleaning
+# Batch cleaning — PARALLEL  (only this function changed)
 # ---------------------------------------------------------------------------
 
 def clean_all_segments(
@@ -206,20 +190,33 @@ def clean_all_segments(
     num_ctx: int = 8192,
     temperature: float = 0.3,
     log_every: int = 3,
+    max_workers: int = 4,          # ← NEW param, default 4
 ) -> list:
     """
-    Clean all TopicSegment objects. Returns list of dicts with cleaned text.
+    Clean all TopicSegment objects in PARALLEL.
 
-    Each returned dict contains everything from the original TopicSegment
-    plus "cleaned_text" and "original_text" fields.
+    How it works:
+      Before: chunk1 → wait → chunk2 → wait → chunk3 → wait ...
+      After:  chunk1, chunk2, chunk3 all sent to Ollama at the same time → wait once
+
+    max_workers = how many chunks run in parallel.
+      - Start with 4 on your AWS GPU.
+      - If Ollama starts giving errors or timeouts → lower to 2 or 3.
+      - If all is stable → try 6.
+
+    Returns results in the SAME ORDER as input (order is preserved).
     """
-    results = []
     total = len(topic_segments)
+    logger.info(
+        "[segment_cleaner] Parallel cleaning: %d segments, max_workers=%d",
+        total, max_workers,
+    )
 
-    for i, seg in enumerate(topic_segments, 1):
-        if i % log_every == 0 or i == total:
-            logger.info("Cleaning segment %d/%d (words: %d)...", i, total, seg.word_count)
+    results_map = {}   # index → result dict, filled as threads complete
+    completed_count = 0
 
+    def _clean_one(index: int, seg) -> tuple:
+        """Worker: cleans one segment, returns (original_index, result_dict)."""
         cleaned = clean_segment(
             text=seg.text,
             ollama_model=ollama_model,
@@ -227,8 +224,7 @@ def clean_all_segments(
             num_ctx=num_ctx,
             temperature=temperature,
         )
-
-        results.append({
+        return index, {
             "topic_index":    seg.topic_index,
             "start":          seg.start,
             "end":            seg.end,
@@ -236,7 +232,43 @@ def clean_all_segments(
             "cleaned_text":   cleaned,
             "original_words": seg.word_count,
             "cleaned_words":  len(cleaned.split()),
-        })
+        }
 
-    logger.info("Cleaned %d/%d segments.", len(results), total)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Submit all at once
+        future_to_index = {
+            executor.submit(_clean_one, i, seg): i
+            for i, seg in enumerate(topic_segments)
+        }
+
+        # Collect as each finishes (order doesn't matter here, we use index)
+        for future in as_completed(future_to_index):
+            completed_count += 1
+            try:
+                index, result = future.result()
+                results_map[index] = result
+
+                if completed_count % log_every == 0 or completed_count == total:
+                    logger.info(
+                        "[segment_cleaner] %d/%d segments cleaned...",
+                        completed_count, total,
+                    )
+            except Exception as exc:
+                # One chunk failed — use regex fallback, don't crash the whole pipeline
+                i = future_to_index[future]
+                seg = topic_segments[i]
+                logger.error("[segment_cleaner] Segment %d failed: %s — using regex fallback.", i, exc)
+                results_map[i] = {
+                    "topic_index":    seg.topic_index,
+                    "start":          seg.start,
+                    "end":            seg.end,
+                    "original_text":  seg.text,
+                    "cleaned_text":   _regex_clean_fallback(seg.text),
+                    "original_words": seg.word_count,
+                    "cleaned_words":  len(seg.text.split()),
+                }
+
+    # Rebuild in original order
+    results = [results_map[i] for i in range(total)]
+    logger.info("[segment_cleaner] Done: %d segments cleaned.", len(results))
     return results

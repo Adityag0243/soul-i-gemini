@@ -28,6 +28,8 @@ import logging
 import re
 from typing import Dict, List, Optional
 
+from torch import chunk
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -67,77 +69,99 @@ def _run_extractor_prompt(
 
     return llm.generate(prompt=user_prompt, system=system_prompt)
 
-
 def _parse_extractor_output(
     raw: str,
     chunk_type: str,
     energy_node: str,
 ) -> List[Dict]:
-    """
-    Parse LLM JSON output into a list of standard chunk dicts.
-
-    LLM is asked to return a JSON array like:
-    [
-        {"text": "...", "problem_keywords": "guilt, avoidance"},
-        {"text": "...", "problem_keywords": "stuck, fear"}
-    ]
-
-    Falls back to treating the whole raw output as one chunk if JSON fails.
-    """
     raw = raw.strip()
     # Strip markdown fences
     raw = re.sub(r"```(?:json)?", "", raw).strip().rstrip("`").strip()
 
-    chunks = []
-
-    # Try parsing as JSON array
-    try:
-        data = json.loads(raw)
-        if isinstance(data, list):
-            for item in data:
-                text = str(item.get("text", "")).strip()
-                keywords = str(item.get("problem_keywords", "")).strip()
-                if text and len(text.split()) >= 5:  # ignore trivially short extracts
-                    chunks.append({
-                        "text":             text,
-                        "chunk_type":       chunk_type,
-                        "energy_node":      energy_node,
-                        "problem_keywords": keywords,
-                        "source_video":     "",   # filled by orchestrator
-                        "youtube_url":      "",   # filled by orchestrator
-                    })
-            return chunks
-        elif isinstance(data, dict):
-            # Sometimes LLM wraps in {"items": [...]} — handle it
-            items = data.get("items", data.get("chunks", data.get("results", [])))
-            if isinstance(items, list):
-                return _parse_extractor_output(json.dumps(items), chunk_type, energy_node)
-    except json.JSONDecodeError:
-        # Try to find JSON array inside noisy text
-        start = raw.find("[")
-        end = raw.rfind("]") + 1
-        if start != -1 and end > start:
-            try:
-                return _parse_extractor_output(raw[start:end], chunk_type, energy_node)
-            except Exception:
-                pass
-
-    # Last resort — treat entire output as one chunk
-    if raw and len(raw.split()) >= 10:
-        logger.warning(
-            "[EXTRACTOR:%s] JSON parse failed — wrapping entire output as single chunk.", chunk_type
-        )
-        chunks.append({
-            "text":             raw[:2000],  # cap at 2000 chars
+    def _build_chunk(item: dict) -> dict:
+        text = str(item.get("text", "")).strip()
+        if not text or len(text.split()) < 5:
+            return {}
+        chunk = {
+            "text":             text,
             "chunk_type":       chunk_type,
             "energy_node":      energy_node,
-            "problem_keywords": "",
+            "problem_keywords": str(item.get("problem_keywords", "")).strip(),
             "source_video":     "",
             "youtube_url":      "",
-        })
+        }
+        if chunk_type == "activities":
+            chunk["activity_name"]    = str(item.get("activity_name", "")).strip()
+            chunk["duration_minutes"] = item.get("duration_minutes")
+            chunk["energy_type"]      = str(item.get("energy_type", "")).strip()
+            chunk["trigger_state"]    = str(item.get("trigger_state", "")).strip()
+            chunk["outcome"]          = str(item.get("outcome", "")).strip()
+        return chunk
 
-    return chunks
+    def _parse_json_str(s: str) -> List[Dict]:
+        data = json.loads(s)
+        chunks = []
+        # Case 1: array of objects  [{"text": ...}, ...]
+        if isinstance(data, list):
+            for item in data:
+                if isinstance(item, dict):
+                    c = _build_chunk(item)
+                    if c:
+                        chunks.append(c)
+                elif isinstance(item, str):
+                    # array of strings — wrap each as text
+                    c = _build_chunk({"text": item})
+                    if c:
+                        chunks.append(c)
+        # Case 2: single object {"text": ...}
+        elif isinstance(data, dict):
+            # maybe wrapped: {"items": [...]} or {"activities": [...]}
+            for key in ("items", "chunks", "results", "activities", "practices"):
+                if key in data and isinstance(data[key], list):
+                    return _parse_json_str(json.dumps(data[key]))
+            # plain single object
+            c = _build_chunk(data)
+            if c:
+                chunks.append(c)
+        return chunks
 
+    # Try direct parse
+    try:
+        return _parse_json_str(raw)
+    except json.JSONDecodeError:
+        pass
+
+    # Try finding JSON array inside noisy text
+    start = raw.find("[")
+    end   = raw.rfind("]") + 1
+    if start != -1 and end > start:
+        try:
+            return _parse_json_str(raw[start:end])
+        except Exception:
+            pass
+
+    # Try finding JSON object inside noisy text
+    start = raw.find("{")
+    end   = raw.rfind("}") + 1
+    if start != -1 and end > start:
+        try:
+            return _parse_json_str(raw[start:end])
+        except Exception:
+            pass
+
+    # Last resort — only if it looks like actual activity content, not LLM refusal
+    refusal_phrases = ["unable to find", "no specific", "no activities", "cannot find", "i could not"]
+    if any(p in raw.lower() for p in refusal_phrases):
+        logger.info("[EXTRACTOR:%s] LLM found no activities — returning empty.", chunk_type)
+        return []
+
+    if raw and len(raw.split()) >= 10:
+        logger.warning("[EXTRACTOR:%s] JSON parse failed — wrapping entire output as single chunk.", chunk_type)
+        c = _build_chunk({"text": raw[:2000]})
+        if c:
+            return [c]
+
+    return []
 
 # ---------------------------------------------------------------------------
 # Extractor 1 — Healing Principles
@@ -217,7 +241,7 @@ def extract_healing_principles(
 ) -> List[Dict]:
     """Extract healing principles — truths the coach says resolve this energy pattern."""
     try:
-        user_prompt = _HEALING_USER.format(transcript=transcript[:8000])
+        user_prompt = _HEALING_USER.format(transcript=transcript[:11000])
         raw = _run_extractor_prompt(transcript, _HEALING_SYSTEM, user_prompt, ollama_model, ollama_endpoint)
         chunks = _parse_extractor_output(raw, "healing", energy_node)
         logger.info("[EXTRACTOR:healing] Extracted %d chunks.", len(chunks))
@@ -230,44 +254,71 @@ def extract_healing_principles(
 # ---------------------------------------------------------------------------
 # Extractor 2 — Activities
 # ---------------------------------------------------------------------------
-
 _ACTIVITIES_SYSTEM = """\
 You are a content analyst for Souli, an inner wellness platform.
-Your job is to extract specific practices and activities from a coach's transcript.
+Your job is to faithfully extract specific practices and activities from a coach's transcript.
 
-An activity is: a concrete, named practice the coach recommends — something
-the person can actually DO. It must have a name AND some instruction or description if possible try to find in what scenerios we need to do this activity.
-Also try to add what will happen if we do this activity for example if you do this activity you will feel more grounded, or you will release stuck energy or your left brain will activate and you will feel more clarity.
+The coach teaches in Souli's energy framework:
+- scattered_energy: anxiety, stress, racing mind, high breath count, dizziness
+- blocked_energy: stuck, frozen, survival mode, root imbalance, body tension
+- depleted_energy: exhaustion, burnout, giving too much, empty feeling
+- normal_energy: clarity, focus, balance, grounded, present
 
-Examples of activities:
-- "2-minute shaking practice: stand up, start shaking your hands and arms, let it travel to your whole body. Do this until you feel a release of tension — usually around 2 minutes, it will recharge your energy and help you feel more grounded."
-- "OM meditation: sit quietly, close your eyes, chant OM for 5 minutes, feeling the vibration in your body. This calms scattered energy and brings you back to your center."
-- "Grounding body scan: lie down, breathe slowly, feel each part of your body touching the ground. This helps with depleted energy by connecting you to the earth and your physical presence."
+An activity MUST have ALL of these to be extracted:
+1. A name (what the coach calls it)
+2. At least one physical instruction (what the person actually does)
+3. Either: when to use it OR what it does to you
 
-Rules:
-- Text must be less than 100 words — we want concise, actionable activities.
-- Only extract if the coach gives the name AND at least one sentence of instruction.
-- Do NOT extract vague mentions like "try meditation" with no detail.
-- Keep the coach's voice — do not invent instructions not in the transcript.
-- Return ONLY valid JSON array, no other text.
+CRITICAL RULES:
+- Keep the coach's EXACT words and phrasing — do NOT rewrite or summarize
+- Longer is better — include full instructions as spoken, up to 200 words per activity
+- Capture the duration if mentioned (2 minutes, 5 minutes, 3 months etc.)
+- Capture what the person will FEEL or experience after doing it
+- Capture WHEN to use it (e.g. "when breath count is high", "when feeling stuck")
+- Do NOT collapse multiple separate activities into one entry — keep them separate
+- Do NOT extract vague mentions like "try meditation" with zero instruction
+- energy_type must be "quick_relief" if under 10 minutes, "deeper_practice" if 10 minutes or more
+- Return ONLY valid JSON array, no other text
 """
 
 _ACTIVITIES_USER = """\
-Extract all specific practices and activities from this transcript.
+Extract every specific practice and activity from this transcript.
+Preserve the coach's exact words as much as possible.
 
 Transcript:
 \"\"\"
 {transcript}
 \"\"\"
 
-Return a JSON array where each item has:
-- "text": the activity name + full instructions as the coach described + any details about when to do it and what it does
-- "problem_keywords": 3-5 comma-separated keywords for the energy state this helps
+Return a JSON array. Each item must have ALL of these fields:
+- "text": activity name + full instructions in the coach's exact words + when to use it + what it does (up to 200 words, do not cut short)
+- "activity_name": just the short name of the activity, e.g. "Shaking Practice", "Moon Breathing", "Tree Hugging"
+- "problem_keywords": 3-5 comma-separated keywords for what state this helps (use energy node names + specific symptoms)
+- "duration_minutes": integer — estimated minutes this takes. Use 1 for instant/seconds, null if truly unknown
+- "energy_type": MUST be exactly "quick_relief" (under 10 min) or "deeper_practice" (10 min or more)
+- "trigger_state": when should someone do this? e.g. "when breath count is high and person feels anxious"
+- "outcome": what will the person feel or experience after? Use coach's words if possible
 
-Example format:
+Example:
 [
-  {{"text": "Shaking practice: stand and shake your hands, arms, then whole body for 2 minutes to release blocked energy.", "problem_keywords": "blocked energy, stuck, body tension"}},
-  {{"text": "...", "problem_keywords": "..."}}
+  {{
+    "text": "Close your right nostril and activate your left nostril to get into the moon energy. Your body will become calm and relaxed. Do this when you are feeling irritated, anxious, or stressed — it immediately brings you into a calmer state.",
+    "activity_name": "Moon Breathing",
+    "problem_keywords": "scattered_energy, irritation, anxiety, stress",
+    "duration_minutes": 2,
+    "energy_type": "quick_relief",
+    "trigger_state": "when feeling irritated, anxious or stressed",
+    "outcome": "body becomes calm and relaxed, moon energy activated"
+  }},
+  {{
+    "text": "Do the shaking practice: stand and shake your hands, arms, then whole body for 2 minutes to release blocked energy. You will feel lighter and more grounded after.",
+    "activity_name": "Shaking Practice",
+    "problem_keywords": "blocked_energy, stuck, body tension",
+    "duration_minutes": 2,
+    "energy_type": "quick_relief",
+    "trigger_state": "when feeling stuck or body tension is present",
+    "outcome": "blocked energy released, feel lighter and more grounded"
+  }}
 ]
 
 If no specific activities are found, return an empty array: []
@@ -282,15 +333,15 @@ def extract_activities(
 ) -> List[Dict]:
     """Extract specific practices and activities the coach recommends."""
     try:
-        user_prompt = _ACTIVITIES_USER.format(transcript=transcript[:8000])
+        user_prompt = _ACTIVITIES_USER.format(transcript=transcript[:12000])
         raw = _run_extractor_prompt(transcript, _ACTIVITIES_SYSTEM, user_prompt, ollama_model, ollama_endpoint)
+        logger.info("[EXTRACTOR:activities] RAW OUTPUT FIRST 500 CHARS: %s", raw[:500])
         chunks = _parse_extractor_output(raw, "activities", energy_node)
         logger.info("[EXTRACTOR:activities] Extracted %d chunks.", len(chunks))
         return chunks
     except Exception as exc:
         logger.warning("[EXTRACTOR:activities] Failed: %s", exc)
         return []
-
 
 # ---------------------------------------------------------------------------
 # Extractor 3 — Stories and Phrases

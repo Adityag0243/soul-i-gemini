@@ -12,6 +12,8 @@ import {
     SaveVoiceTranscriptInput,
     GetSessionsQuery,
     GetMessagesQuery,
+    CompleteSessionInput,
+    MarkCouponPopupShownInput,
 } from '../schemas/chat.schema';
 
 // ── Idempotency-Key store (T9 — Phase 12.3) ────────────────────────────────
@@ -274,4 +276,60 @@ export async function getMessages(
     });
 
     new SuccessResponse('Messages retrieved', result).send(res);
+}
+
+// FREE SESSION MANAGEMENT
+
+// Get free session status for current user
+// GET /chat/sessions/status/free
+
+export async function getFreeSessionStatus(
+    req: ProtectedRequest,
+    res: Response,
+): Promise<void> {
+    const status = await ChatService.getFreeSessionStatus(req.user.id);
+
+    new SuccessResponse('Free session status retrieved', status).send(res);
+}
+
+// Mark session as complete and increment free session counter
+// POST /chat/sessions/:sessionId/complete
+
+export async function completeSession(
+    req: ProtectedRequest,
+    res: Response,
+): Promise<void> {
+    const { sessionId } = req.params;
+    const input = req.body as CompleteSessionInput;
+
+    const result = await ChatService.completeSession(
+        req.user.id,
+        sessionId,
+        input.phase,
+        input.turnCount,
+    );
+
+    new SuccessResponse('Session completed', result).send(res);
+}
+
+// Mark coupon popup as shown for user
+// POST /chat/sessions/coupon-popup/shown
+
+export async function markCouponPopupShown(
+    req: ProtectedRequest,
+    res: Response,
+): Promise<void> {
+    const input = req.body as MarkCouponPopupShownInput;
+
+    if (input.shown === false) {
+        new SuccessResponse('Coupon popup marked as not shown', {
+            popupShown: false,
+            message: 'Status updated',
+        }).send(res);
+        return;
+    }
+
+    const result = await ChatService.markCouponPopupShown(req.user.id);
+
+    new SuccessResponse('Coupon popup marked as shown', result).send(res);
 }

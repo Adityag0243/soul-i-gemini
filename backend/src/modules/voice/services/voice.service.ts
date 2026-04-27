@@ -3,10 +3,12 @@ import {
     AgentDispatchClient,
     RoomServiceClient,
 } from 'livekit-server-sdk';
-import { InternalError } from '../../../core/api-error';
+import { FeatureKey } from '@prisma/client';
+import { ForbiddenError, InternalError } from '../../../core/api-error';
 import logger from '../../../core/logger';
 import { voiceConfig } from '../../../config';
 import ChatService from '../../chat/services/chat.service';
+import FeatureControlService from '../../admin-panel/featureControl/services/feature-control.service';
 import {
     CreateVoiceTokenInput,
     CreateVoiceBootstrapInput,
@@ -22,6 +24,16 @@ function ensureVoiceConfig(): void {
         throw new InternalError(
             'LiveKit is not configured. Set LIVEKIT_URL, LIVEKIT_API_KEY and LIVEKIT_API_SECRET.',
         );
+    }
+}
+
+async function ensureVoiceInputEnabled(): Promise<void> {
+    const voiceInputEnabled = await FeatureControlService.isFeatureEnabled(
+        FeatureKey.VOICE_INPUT,
+    );
+
+    if (!voiceInputEnabled) {
+        throw new ForbiddenError('Voice input is currently disabled by admin');
     }
 }
 
@@ -159,6 +171,7 @@ export async function createVoiceToken(
     userId: number,
     input: CreateVoiceTokenInput,
 ): Promise<VoiceTokenResponse> {
+    await ensureVoiceInputEnabled();
     ensureVoiceConfig();
 
     const roomName = resolveRoomName(userId, input);

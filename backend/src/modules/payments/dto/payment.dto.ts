@@ -130,6 +130,18 @@ export interface CreatePaymentResponseDto {
     };
 }
 
+export interface CouponRedemptionResponseDto {
+    success: boolean;
+    message: string;
+    data: {
+        code: string;
+        subscriptionId: string;
+        status: string;
+        expiresAt?: Date;
+        alreadyApplied: boolean;
+    };
+}
+
 export interface CancelSubscriptionResponseDto {
     success: boolean;
     message: string;
@@ -143,4 +155,20 @@ export interface UpgradeSubscriptionResponseDto {
     newPlanId: string;
     nextBillingDate: Date;
     proration?: number;
+}
+
+export interface UpgradePreviewResponseDto {
+    provider: 'stripe' | 'razorpay';
+    currentPlanId: string;
+    currentPlanName: string;
+    newPlanId: string;
+    newPlanName: string;
+    currentPeriodEnd?: Date;
+    proration: {
+        ratioRemaining: number;
+        oldPlanCreditInrPaise?: number;
+        newPlanCostInrPaise?: number;
+        finalChargeInrPaise?: number;
+        note: string;
+    };
 }

@@ -44,17 +44,35 @@ def _content_uuid(text: str, source: str) -> str:
     return str(uuid.uuid5(uuid.NAMESPACE_DNS, key))
 
 
-def _get_qdrant_client(host: str = "localhost", port: int = 6333):
-    try:
-        from qdrant_client import QdrantClient
-        client = QdrantClient(host=host, port=port, timeout=8)
-        client.get_collections()
-        return client
-    except Exception:
-        logger.warning("Qdrant not reachable at %s:%s — using in-memory.", host, port)
-        from qdrant_client import QdrantClient
-        return QdrantClient(":memory:")
+def _get_qdrant_client(host: str = None, port: int = None):
+    import os
+    from qdrant_client import QdrantClient
 
+    api_key = os.getenv("QDRANT_API_KEY")
+    qdrant_host = host or os.getenv("QDRANT_HOST", "localhost")
+    qdrant_port = port or int(os.getenv("QDRANT_PORT", 6333))
+
+    try:
+        if api_key and qdrant_host != "localhost":
+            # Qdrant Cloud
+            client = QdrantClient(
+                url=f"https://{qdrant_host}",
+                api_key=api_key,
+                timeout=30,
+            )
+        else:
+            # Local Qdrant
+            client = QdrantClient(host=qdrant_host, port=qdrant_port, timeout=10)
+
+        client.get_collections()  # test connection
+        logger.info("Connected to Qdrant at %s", qdrant_host)
+        return client
+
+    except Exception as e:
+        raise RuntimeError(
+            f"Cannot connect to Qdrant at {qdrant_host}:{qdrant_port}. "
+            f"Check QDRANT_HOST and QDRANT_API_KEY in your .env. Error: {e}"
+        )
 
 def _ensure_collection(client, collection: str):
     from qdrant_client.models import Distance, VectorParams

@@ -20,6 +20,9 @@ import {
     PauseSubscriptionInput,
     ResumeSubscriptionInput,
     PortalSessionInput,
+    RedeemCouponInput,
+    PreviewUpgradeInput,
+    UpgradeSubscriptionInput,
 } from '../schemas/payment.schema';
 
 /**
@@ -122,6 +125,41 @@ export async function cancelSubscription(
 
     new SuccessResponse('Subscription cancelled successfully', {
         message: 'Your subscription has been cancelled',
+    }).send(res);
+}
+
+/**
+ * Preview subscription upgrade and proration details
+ * POST /payments/subscription/upgrade/preview
+ */
+export async function previewSubscriptionUpgrade(
+    req: ProtectedRequest,
+    res: Response,
+): Promise<void> {
+    const body = req.body as PreviewUpgradeInput;
+    const preview = await subscriptionService.previewUpgrade(req.user!.id, body);
+
+    new SuccessResponse('Subscription upgrade preview generated', {
+        preview,
+    }).send(res);
+}
+
+/**
+ * Execute subscription upgrade
+ * POST /payments/subscription/upgrade
+ */
+export async function upgradeSubscription(
+    req: ProtectedRequest,
+    res: Response,
+): Promise<void> {
+    const body = req.body as UpgradeSubscriptionInput;
+    const result = await subscriptionService.upgradeSubscription(
+        req.user!.id,
+        body,
+    );
+
+    new SuccessResponse('Subscription upgrade initiated', {
+        upgrade: result,
     }).send(res);
 }
 

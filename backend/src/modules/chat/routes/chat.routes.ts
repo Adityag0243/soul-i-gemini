@@ -12,6 +12,8 @@ import {
     sessionIdParamSchema,
     getSessionsQuerySchema,
     getMessagesQuerySchema,
+    completeSessionSchema,
+    markCouponPopupShownSchema,
 } from '../schemas/chat.schema';
 import * as ChatController from '../controllers/chat.controller';
 

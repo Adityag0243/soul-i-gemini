@@ -113,6 +113,10 @@ export const paymentConfig = {
     // Razorpay
     razorpayKeyId: process.env.RAZORPAY_KEY_ID || '',
     razorpayKeySecret: process.env.RAZORPAY_KEY_SECRET || '',
+    usdToInrExchangeRate: (() => {
+        const raw = parseFloat(process.env.USD_TO_INR_EXCHANGE_RATE || '75');
+        return Number.isFinite(raw) && raw > 0 ? raw : 75;
+    })(),
 
     // Webhook
     stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET || '',
@@ -121,6 +125,15 @@ export const paymentConfig = {
     // subscription reminders - in days before expiry
     subscriptionReminderDays: parseInt(
         process.env.SUBSCRIPTION_REMINDER_DAYS || '7',
+    ),
+
+    // temporary static coupon for app launch free access
+    trialCouponCode: process.env.TRIAL_COUPON_CODE || 'TESTNEW',
+    trialCouponEnabled:
+        (process.env.TRIAL_COUPON_ENABLED || 'true').toLowerCase() === 'true',
+    trialCouponValidityDays: parseInt(
+        process.env.TRIAL_COUPON_VALIDITY_DAYS || '60',
+        10,
     ),
 };
 
@@ -131,7 +144,6 @@ export const configS3 = {
     awsRegion: process.env.AWS_REGION || 'ap-south-1',
     awsAccessKeyId: process.env.AWS_ACCESS_KEY_ID || '',
     awsSecretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || '',
-    bucket: process.env.S3_BUCKET || '',
-    // No trailing slash. Falls back to direct S3 URL if no CDN configured.
+    bucket: process.env.S3_BUCKET || process.env.AWS_S3_BUCKET || '',
     cdnBaseUrl: (process.env.CDN_BASE_URL || '').replace(/\/$/, ''),
 };

@@ -1,7 +1,5 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Souli Pipeline — Production Dockerfile
-# Runs on EC2/GCE VM alongside Ollama + Qdrant containers via docker-compose
-# Use docker-compose.aws.yml (default) or docker-compose.gcp.yml
 # ─────────────────────────────────────────────────────────────────────────────
 FROM nvidia/cuda:12.8.0-runtime-ubuntu22.04
 
@@ -16,14 +14,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     curl \
     mpg123 \
-    nodejs \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
     && ln -sf /usr/bin/python3.11 /usr/bin/python3 \
-    && ln -sf /usr/bin/python3.11 /usr/bin/python \
+    && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
+
 # Install Python deps first (layer cache)
 COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
+
 # Copy source
 COPY . /app
 
@@ -32,7 +34,9 @@ RUN pip install .
 
 # Create data and outputs directories
 RUN mkdir -p /app/data /app/outputs
+
 ENV PYTHONUNBUFFERED=1
 ENV SOULI_LOG_LEVEL=INFO
 ENV SOULI_CONFIG=/app/configs/pipeline.aws.yaml
+
 CMD ["souli", "--help"]

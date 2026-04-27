@@ -35,6 +35,12 @@ async function findByEmail(email: string): Promise<AuthUser | null> {
             code: ur.role.code as RoleCode,
             status: ur.role.status,
         })),
+        verified: user.verified,
+        status: user.status,
+        freeSessionsCompleted: user.freeSessionsCompleted,
+        couponPopupShown: user.couponPopupShown,
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt,
     };
 }
 
@@ -117,6 +123,12 @@ async function create(
                         status: ur.role.status,
                     }),
                 ),
+                verified: userWithRoles!.verified,
+                status: userWithRoles!.status,
+                freeSessionsCompleted: userWithRoles!.freeSessionsCompleted,
+                couponPopupShown: userWithRoles!.couponPopupShown,
+                createdAt: userWithRoles!.createdAt,
+                updatedAt: userWithRoles!.updatedAt,
             },
             keystore,
         };
@@ -162,6 +174,12 @@ async function findById(id: number): Promise<AuthUser | null> {
                 status: ur.role.status,
             }),
         ),
+        verified: user.verified,
+        status: user.status,
+        freeSessionsCompleted: user.freeSessionsCompleted,
+        couponPopupShown: user.couponPopupShown,
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt,
     };
 }
 

@@ -3,6 +3,10 @@ import healthRoutes from './health/index';
 import { apiKeyMiddleware } from '../middlewares/api-key.middleware';
 import permission from '../middlewares/permission.middleware';
 import { authRoutes as authModuleRoutes } from '../modules/auth';
+import { adminAuthRoutes } from '../modules/admin-panel/auth';
+import { contentManagementRoutes } from '../modules/admin-panel/contentManagement';
+import { dashboardRoutes } from '../modules/admin-panel/dashboard';
+import { featureControlRoutes } from '../modules/admin-panel/featureControl';
 import { chatRoutes } from '../modules/chat';
 import { notificationsRoutes } from '../modules/notifications';
 import { usersRoutes } from '../modules/users';
@@ -12,6 +16,7 @@ import { checkinRoutes } from '../modules/checkins';
 import { energyNodeRoutes, practiceRoutes, assignmentRoutes } from '../modules/practices';
 import { referralRoutes } from '../modules/referrals';
 import { aiEventRoutes } from '../modules/ai-events';
+import { settingsRoutes } from '../modules/settings';
 import { Permission } from '@prisma/client';
 
 const router = Router();
@@ -35,6 +40,15 @@ router.use('/users', usersRoutes);
 
 router.use('/notifications', notificationsRoutes);
 
+// separate admin auth routes (intentionally excluded from Swagger registration)
+router.use('/admin/auth', adminAuthRoutes);
+
+router.use('/admin/content-management', contentManagementRoutes);
+
+router.use('/admin/dashboard', dashboardRoutes);
+
+router.use('/admin/feature-control', featureControlRoutes);
+
 router.use('/chat', chatRoutes);
 
 router.use('/voice', voiceRoutes);
@@ -52,5 +66,7 @@ router.use('/practices', practiceRoutes);
 router.use('/practice-assignments', assignmentRoutes);
 
 router.use('/referrals', referralRoutes);
+
+router.use('/settings', settingsRoutes);
 
 export default router;

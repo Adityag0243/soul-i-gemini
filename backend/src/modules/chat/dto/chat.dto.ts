@@ -81,3 +81,27 @@ export interface MessageListResponseDto {
     total: number;
     sessionId: string;
 }
+
+// Free session tracking DTOs
+export interface FreeSessionStatusDto {
+    freeSessionsCompleted: number;
+    freeSessionsRemaining: number;
+    canCreateNewSession: boolean;
+    hasActiveSubscription: boolean;
+    shouldShowCouponPopup: boolean;
+    couponPopupAlreadyShown: boolean;
+}
+
+export interface SessionCompletionDto {
+    sessionId: string;
+    isComplete: boolean;
+    phase?: string;
+    turnCount: number;
+    freeSessionsCompleted: number;
+    shouldShowCouponPopup: boolean;
+}
+
+export interface CouponPopupStatusDto {
+    popupShown: boolean;
+    message: string;
+}
