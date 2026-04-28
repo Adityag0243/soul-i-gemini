@@ -4,6 +4,7 @@ Souli REST API — FastAPI server for mobile app integration
 
 Endpoints:
   POST /chat              — text message → text reply
+  POST /chat/stream       — text message → SSE streaming reply (T9)
   POST /voice             — audio file upload → text reply + audio bytes
   POST /session/reset     — reset conversation state for a session
   GET  /session/{id}/state — get current phase, energy_node, turn count
@@ -27,17 +28,22 @@ In Docker (GCP):
 from __future__ import annotations
 from dotenv import load_dotenv
 load_dotenv()
+import asyncio
 import io
+import json as _json
 import logging
 import os
 import tempfile
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Any, AsyncGenerator, Dict, List, Optional
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel
+from starlette.middleware.base import BaseHTTPMiddleware
+
+from souli_pipeline.storage import mongo_store as _mongo
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 
@@ -74,6 +80,42 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ── Internal API Key auth (T2 — Phase 5.1) ──────────────────────────────────
+# All routes except /health require X-Internal-API-Key header matching the
+# INTERNAL_API_KEY env var. When the var is unset the middleware is skipped
+# (dev/local mode); in production it MUST be set.
+
+_INTERNAL_API_KEY = os.environ.get("INTERNAL_API_KEY")
+_AUTH_EXEMPT_PATHS = {"/health", "/docs", "/openapi.json", "/redoc"}
+
+
+class InternalAPIKeyMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        if _INTERNAL_API_KEY is None:
+            return await call_next(request)
+
+        if request.url.path in _AUTH_EXEMPT_PATHS:
+            return await call_next(request)
+
+        key = request.headers.get("x-internal-api-key")
+        if key != _INTERNAL_API_KEY:
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "Invalid or missing X-Internal-API-Key"},
+            )
+
+        request_id = request.headers.get("x-request-id")
+        if request_id:
+            logger.info("req %s %s [request_id=%s]", request.method, request.url.path, request_id)
+
+        response = await call_next(request)
+        if request_id:
+            response.headers["X-Request-Id"] = request_id
+        return response
+
+
+app.add_middleware(InternalAPIKeyMiddleware)
 
 # ── Session store ─────────────────────────────────────────────────────────────
 # Maps session_id (string) → ConversationEngine instance
@@ -162,11 +204,21 @@ class ChatResponse(BaseModel):
 
 class SessionState(BaseModel):
     session_id: str
+    user_id: Optional[str] = None  # always null in v1 (D11 — anonymous on AI side)
     phase: str
-    energy_node: Optional[str]
+    energy_node: Optional[str] = None
+    secondary_node: Optional[str] = None
+    node_reasoning: Optional[str] = None
+    commitment_status: Optional[str] = None
     turn_count: int
-    intent: Optional[str]
-    user_name: Optional[str]
+    intent: Optional[str] = None
+    user_name: Optional[str] = None
+    solution_step: Optional[int] = None
+    solution_complete: bool = False
+    solution_steps_history: List[Dict[str, Any]] = []
+    three_day_task: Optional[Any] = None  # populated by Phase 13 webhook flow
+    rag_sources_used: List[Dict[str, Any]] = []
+    last_updated_at: Optional[str] = None
 
 
 class ResetResponse(BaseModel):
@@ -224,6 +276,83 @@ def chat(req: ChatRequest):
 def _safe_header(text: str) -> str:
     """Strip non-latin-1 chars so HTTP headers don't blow up on em-dashes, smart quotes etc."""
     return text.encode("latin-1", errors="replace").decode("latin-1")
+
+
+# ── 1b. Streaming Text Chat (T9) ────────────────────────────────────────────
+
+def _chunk_text(text: str, max_chars: int = 40) -> List[str]:
+    """Break text into word-boundary chunks for SSE streaming."""
+    words = text.split(" ")
+    chunks: List[str] = []
+    current = ""
+    for word in words:
+        candidate = f"{current} {word}".strip() if current else word
+        if len(candidate) > max_chars and current:
+            chunks.append(current)
+            current = word
+        else:
+            current = candidate
+    if current:
+        chunks.append(current)
+    return chunks or [text]
+
+
+@app.post("/chat/stream", summary="[SSE] Send a text message, receive streaming reply")
+async def chat_stream(req: ChatRequest):
+    """
+    SSE streaming version of /chat. Same input, streamed output.
+
+    Events emitted (one per SSE frame):
+      - **chunk**:    `{"text": "..."}` — incremental reply text
+      - **metadata**: `{phase, energy_node, secondary_node, node_reasoning, turn_count, solution_step, solution_complete}` — AI metadata after full reply
+      - **done**:     `{"session_id": "...", "full_reply": "..."}` — stream complete
+      - **error**:    `{"message": "..."}` — on failure (terminal)
+    """
+    if not req.message.strip():
+        raise HTTPException(status_code=400, detail="message cannot be empty")
+
+    engine = _get_or_create_gemini_engine(req.session_id)
+
+    async def _sse() -> AsyncGenerator[str, None]:
+        try:
+            reply = engine.turn(req.message, session_id=req.session_id)
+            diag = engine.diagnosis_summary
+
+            for chunk in _chunk_text(reply, max_chars=40):
+                yield f"event: chunk\ndata: {_json.dumps({'text': chunk})}\n\n"
+                await asyncio.sleep(0)
+
+            metadata = {
+                "phase": engine.state.phase if engine.state else "unknown",
+                "energy_node": diag.get("energy_node"),
+                "secondary_node": diag.get("secondary_node"),
+                "node_reasoning": diag.get("node_reasoning"),
+                "turn_count": diag.get("turn_count", 0),
+                "solution_step": engine.state.solution_step if engine.state else None,
+                "solution_complete": engine.state.solution_complete if engine.state else False,
+            }
+            yield f"event: metadata\ndata: {_json.dumps(metadata)}\n\n"
+
+            yield f"event: done\ndata: {_json.dumps({'session_id': req.session_id, 'full_reply': reply})}\n\n"
+
+        except Exception as exc:
+            logger.error("Stream error for session %s: %s", req.session_id, exc)
+            yield f"event: error\ndata: {_json.dumps({'message': str(exc)})}\n\n"
+
+    return StreamingResponse(
+        _sse(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.get("/health", summary="Health check")
+def health():
+    return {"status": "ok", "engine": "gemini"}
 
 # ── 2. Voice Chat ─────────────────────────────────────────────────────────────
 
@@ -337,20 +466,61 @@ def reset_session(session_id: str = Form(...)):
 def get_session_state(session_id: str):
     """
     Get the current conversation state for a session.
-    Useful for the mobile app to show progress indicators or debug.
+    Returns full AI metadata — phase, energy nodes, commitment status,
+    solution progress, RAG sources, last-update timestamp. Used by the
+    backend to proxy AI state to mobile via GET /chat/sessions/{id}/ai-state.
     """
-    if session_id not in _sessions:
+    # /chat puts sessions in _gemini_sessions; the previous implementation
+    # only checked the legacy _sessions store, so it 404'd for every active
+    # session. Check both, prefer Gemini.
+    gemini_engine = _gemini_sessions.get(session_id)
+    legacy_engine = _sessions.get(session_id) if gemini_engine is None else None
+
+    if gemini_engine is None and legacy_engine is None:
         raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found")
 
-    engine = _sessions[session_id]
-    diag = engine.diagnosis_summary
+    # Pull persisted metadata (user_id is always null per D11; _last_updated
+    # for cache freshness signals on mobile). Document may not exist yet for
+    # an in-memory-only legacy session.
+    mongo_doc = _mongo.get_session(session_id) or {}
+    metadata = mongo_doc.get("session_metadata", {})
+
+    if gemini_engine is not None:
+        state = gemini_engine.state
+        diag = gemini_engine.diagnosis_summary
+        return SessionState(
+            session_id=session_id,
+            user_id=metadata.get("user_id"),
+            phase=diag.get("phase") or (state.phase if state else "greeting"),
+            energy_node=state.energy_node if state else None,
+            secondary_node=state.secondary_node if state else None,
+            node_reasoning=state.node_reasoning if state else None,
+            commitment_status=state.commitment_status if state else None,
+            turn_count=state.turn_count if state else 0,
+            intent=None,      # gemini engine doesn't track intent
+            user_name=None,   # gemini engine doesn't track user_name
+            solution_step=state.solution_step if state else None,
+            solution_complete=state.solution_complete if state else False,
+            solution_steps_history=state.solution_steps_history if state else [],
+            three_day_task=None,  # Phase 13 webhook flow surfaces this later
+            rag_sources_used=state.solution_rag_chunks if state else [],
+            last_updated_at=mongo_doc.get("_last_updated"),
+        )
+
+    # Legacy ConversationEngine fallback
+    diag = legacy_engine.diagnosis_summary
     return SessionState(
         session_id=session_id,
-        phase=engine.state.phase,
+        user_id=metadata.get("user_id"),
+        phase=legacy_engine.state.phase,
         energy_node=diag.get("energy_node"),
-        turn_count=engine.state.turn_count,
-        intent=engine.state.intent,
-        user_name=engine.state.user_name,
+        secondary_node=diag.get("secondary_node"),
+        node_reasoning=diag.get("node_reasoning"),
+        commitment_status=None,
+        turn_count=legacy_engine.state.turn_count,
+        intent=legacy_engine.state.intent,
+        user_name=legacy_engine.state.user_name,
+        last_updated_at=mongo_doc.get("_last_updated"),
     )
 
 
