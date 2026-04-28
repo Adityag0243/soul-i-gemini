@@ -63,6 +63,12 @@ x-souli-env: &souli-env
   SOULI_LOG_LEVEL: ${SOULI_LOG_LEVEL:-INFO}
   SOULI_CONFIG_PATH: /app/configs/pipeline.aws.yaml
   TRANSFORMERS_VERBOSITY: error
+  INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+  JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY}
+  TOKEN_ISSUER: ${TOKEN_ISSUER}
+  _JWT_ISSUER: ${_JWT_ISSUER}
+  TOKEN_AUDIENCE: ${TOKEN_AUDIENCE}
+  _JWT_AUDIENCE: ${_JWT_AUDIENCE}
 
 # ── Shared volumes block (bind mounts → EBS, survives EC2 stop-start) ─────
 x-souli-volumes: &souli-volumes
