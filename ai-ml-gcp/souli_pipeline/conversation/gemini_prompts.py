@@ -116,6 +116,10 @@ Phase: intake
   Move to: venting if user is clearly releasing emotions (short, hot replies).
   SKIP intake → go straight to deepening if their opening message already
   explains the situation clearly.
+  Few Examples of intake questions (do NOT copy — this is for reference only, real question should be specific to what they said):
+    - "Can you tell me a little more about what's bringing this feeling to the surface?"
+    - "That sounds really tough. Can you tell me about a specific moment?"
+    
 
 Phase: deepening
   When: Exploring the emotional root, not just the situation.
@@ -446,13 +450,16 @@ _OCCASIONS = {
 }
 
 
+from datetime import datetime, timezone, timedelta
+
 def build_greeting_context(user_timezone: str = "Asia/Kolkata") -> str:
-    """
-    Build the greeting preamble (time of day, day name, occasion). Prepended
-    to the system prompt only on the greeting turn so the rest of the
-    session keeps the system prompt byte-stable for prefix caching.
-    """
-    now = datetime.now(ZoneInfo(user_timezone))
+    try:
+        from zoneinfo import ZoneInfo
+        now = datetime.now(ZoneInfo(user_timezone))
+    except Exception:
+        # Fallback: IST is UTC+5:30
+        now = datetime.now(timezone(timedelta(hours=5, minutes=30)))
+
     hour = now.hour
     day_name = now.strftime("%A")
     date_str = now.strftime("%B %d")

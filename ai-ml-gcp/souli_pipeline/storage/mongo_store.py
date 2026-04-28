@@ -78,6 +78,8 @@ def create_session(
     session_id: str,
     model_flash: str,
     model_pro: str,
+    user_id: int = None,
+    user_name: str = None,
 ) -> bool:
     """
     Create a new session document in MongoDB.
@@ -89,7 +91,8 @@ def create_session(
     doc = {
         "session_metadata": {
             "session_id":        session_id,
-            "user_id":           None,        # intentionally null — benchmark mode
+            "user_id":           user_id,
+            "user_name":         user_name,      
             "start_timestamp":   _now(),
             "energy_node_assigned": None,
             "secondary_node":    None,

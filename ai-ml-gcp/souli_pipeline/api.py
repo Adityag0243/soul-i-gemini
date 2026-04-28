@@ -33,6 +33,8 @@ import io
 import json as _json
 import logging
 import os
+import uuid
+import jwt 
 import tempfile
 from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, List, Optional
@@ -65,10 +67,17 @@ EXCEL_PATH = os.environ.get(
 
 # ── App ───────────────────────────────────────────────────────────────────────
 
+from fastapi.security import HTTPBearer, APIKeyHeader
+
+# These show up as the "Authorize" button in Swagger UI
+_api_key_header = APIKeyHeader(name="X-Internal-API-Key", auto_error=False)
+_bearer_scheme = HTTPBearer(auto_error=False)
+
 app = FastAPI(
     title="Souli API",
     description="REST API for Souli wellness companion — connects chat and voice to your mobile app",
     version="1.0.0",
+    swagger_ui_parameters={"persistAuthorization": True},  # keeps your tokens after page refresh
 )
 
 # Allow any origin so the mobile app (React Native / Flutter) can call freely.
@@ -81,41 +90,125 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── Internal API Key auth (T2 — Phase 5.1) ──────────────────────────────────
-# All routes except /health require X-Internal-API-Key header matching the
-# INTERNAL_API_KEY env var. When the var is unset the middleware is skipped
-# (dev/local mode); in production it MUST be set.
+# ── Auth Middleware (Internal API Key + JWT Bearer) ──────────────────────────
+# Two layers:
+#   1. X-Internal-API-Key header — proves request is from the real Souli app
+#   2. Authorization: Bearer <JWT> — proves which user is making the request
+#
+# Both are required on every request except exempt paths.
+# The JWT is RS256-signed by the backend; we verify with the public key only.
 
-_INTERNAL_API_KEY = os.environ.get("INTERNAL_API_KEY")
-_AUTH_EXEMPT_PATHS = {"/health", "/docs", "/openapi.json", "/redoc"}
+_INTERNAL_API_KEY = os.environ.get("INTERNAL_API_KEY", "").strip()
+# _JWT_PUBLIC_KEY = os.environ.get("JWT_PUBLIC_KEY", "").replace("\\n", "\n").strip()
+_JWT_PUBLIC_KEY = os.environ.get("JWT_PUBLIC_KEY", "").replace("\\n", "\n").strip()
+_JWT_ISSUER = os.environ.get("JWT_ISSUER", os.environ.get("TOKEN_ISSUER", "")).strip()
+_JWT_AUDIENCE = os.environ.get("JWT_AUDIENCE", os.environ.get("TOKEN_AUDIENCE", "")).strip()
+_AUTH_EXEMPT_PATHS = {"/health", "/gemini/health", "/docs", "/openapi.json", "/redoc"}
 
 
-class InternalAPIKeyMiddleware(BaseHTTPMiddleware):
+def _decode_jwt(token: str) -> dict:
+    """
+    Verify and decode a JWT access token using the backend's RSA public key.
+    Returns the decoded payload dict with keys: sub, iss, aud, exp, iat, prm.
+    Raises HTTPException on any failure.
+    """
+    if not _JWT_PUBLIC_KEY:
+        raise HTTPException(
+            status_code=500,
+            detail="JWT_PUBLIC_KEY not configured on AI server",
+        )
+    try:
+        payload = jwt.decode(
+            token,
+            _JWT_PUBLIC_KEY,
+            algorithms=["RS256"],
+            issuer=_JWT_ISSUER or None,
+            audience=_JWT_AUDIENCE or None,
+        )
+        return payload
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token has expired")
+    except jwt.InvalidTokenError as exc:
+        raise HTTPException(status_code=401, detail=f"Invalid token: {exc}")
+
+
+class AuthMiddleware(BaseHTTPMiddleware):
+    """
+    Combined auth middleware — checks both layers on every request.
+
+    Layer 1: X-Internal-API-Key header must match INTERNAL_API_KEY env var.
+             If INTERNAL_API_KEY env is empty → skip this check (dev mode).
+
+    Layer 2: Authorization: Bearer <JWT> must be a valid RS256 token.
+             Extracts user_id from JWT "sub" claim.
+
+    On success, sets:
+      - request.state.user_id      (int)  — from JWT "sub" claim
+      - request.state.jwt_payload  (dict) — full decoded JWT payload
+    """
+
     async def dispatch(self, request: Request, call_next):
-        if _INTERNAL_API_KEY is None:
+        # Skip auth for exempt paths and CORS preflight
+        if request.url.path in _AUTH_EXEMPT_PATHS or request.method == "OPTIONS":
             return await call_next(request)
 
-        if request.url.path in _AUTH_EXEMPT_PATHS:
-            return await call_next(request)
+        # ── Layer 1: Internal API Key ──
+        if _INTERNAL_API_KEY:
+            api_key = request.headers.get("x-internal-api-key", "")
+            if api_key != _INTERNAL_API_KEY:
+                return JSONResponse(
+                    status_code=403,
+                    content={"detail": "Invalid or missing X-Internal-API-Key"},
+                )
 
-        key = request.headers.get("x-internal-api-key")
-        if key != _INTERNAL_API_KEY:
+        # ── Layer 2: JWT Bearer Token ──
+        auth_header = request.headers.get("authorization", "")
+        if not auth_header.startswith("Bearer "):
             return JSONResponse(
-                status_code=403,
-                content={"detail": "Invalid or missing X-Internal-API-Key"},
+                status_code=401,
+                content={
+                    "detail": "Missing or invalid Authorization header. "
+                              "Expected: Bearer <token>"
+                },
             )
 
+        token = auth_header[7:]  # strip "Bearer "
+        try:
+            payload = _decode_jwt(token)
+        except HTTPException as exc:
+            return JSONResponse(
+                status_code=exc.status_code,
+                content={"detail": exc.detail},
+            )
+
+        # Validate sub claim — must be a numeric user_id
+        sub = payload.get("sub")
+        if not sub or not str(sub).isdigit():
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Invalid token: missing or non-numeric user ID"},
+            )
+
+        # Attach to request state — endpoints read from here
+        request.state.user_id = int(sub)
+        request.state.jwt_payload = payload
+
+        # Pass through request_id if present (for tracing)
         request_id = request.headers.get("x-request-id")
         if request_id:
-            logger.info("req %s %s [request_id=%s]", request.method, request.url.path, request_id)
+            logger.info(
+                "req %s %s [user_id=%s, request_id=%s]",
+                request.method, request.url.path, sub, request_id,
+            )
 
         response = await call_next(request)
+
         if request_id:
             response.headers["X-Request-Id"] = request_id
         return response
 
 
-app.add_middleware(InternalAPIKeyMiddleware)
+app.add_middleware(AuthMiddleware)
 
 # ── Session store ─────────────────────────────────────────────────────────────
 # Maps session_id (string) → ConversationEngine instance
@@ -438,27 +531,37 @@ async def voice(
 
 
 # ── 3. Reset Session ──────────────────────────────────────────────────────────
-
 @app.post("/session/reset", response_model=ResetResponse, summary="Start a fresh conversation")
-def reset_session(session_id: str = Form(...)):
-    """
-    Reset the conversation state for a session.
-    Call this when the user taps "New Session" in the mobile app.
-    Returns the greeting message so the app can display it immediately.
-    """
-    if session_id in _sessions:
-        _sessions[session_id].reset()
-        engine = _sessions[session_id]
-    else:
-        engine = _get_or_create_gemini_engine(session_id)
+def reset_session(
+    request: Request,
+    session_id: str = Form(...),
+):
+    user_id = request.state.user_id
+    user_name = None
 
-    greeting = engine.greeting()
-    return ResetResponse(
-        session_id=session_id,
-        status="reset",
-        greeting=greeting,
+    old_engine = _gemini_sessions.get(session_id)
+    if old_engine and old_engine.state:
+        user_name = old_engine.state.user_name
+
+    new_session_id = str(uuid.uuid4())
+    engine = _get_or_create_gemini_engine(
+        session_id=new_session_id,
+        user_id=user_id,
+        user_name=user_name,
     )
+    greet_text = engine.greeting(user_name=user_name)
 
+    # Clean up old session from memory
+    if session_id in _gemini_sessions:
+        del _gemini_sessions[session_id]
+    if session_id in _sessions:
+        del _sessions[session_id]
+
+    return ResetResponse(
+        session_id=new_session_id,
+        status="reset",
+        greeting=greet_text,
+    )
 
 # ── 4. Session State ──────────────────────────────────────────────────────────
 
@@ -616,20 +719,46 @@ def get_session_state(session_id: str):
         )
 # ── 6. Greeting (convenience for first-open in mobile app) ───────────────────
 
-@app.post("/session/greeting", response_model=ChatResponse, summary="Get opening greeting for a new session")
+from fastapi import Depends
+
+@app.post("/session/greeting", summary="Get opening greeting for a new session")
 def greeting(
-    session_id: str = Form(...),
+    request: Request,
     user_name: str = Form(default="buddy"),
+    _api_key: str = Depends(_api_key_header), 
+    _bearer: str = Depends(_bearer_scheme),
 ):
-    engine = _get_or_create_gemini_engine(session_id)
-    greet_text = engine.greeting(user_name=user_name)
-    return ChatResponse(
+    """
+    Start a new Souli session. Call this when user opens the app or taps "New Chat".
+
+    Headers required:
+      - Authorization: Bearer <accessToken>
+      - X-Internal-API-Key: <api_key>
+
+    Form body:
+      - user_name: display name (from login response data.user.name)
+
+    Returns a new session_id (UUID) + greeting message.
+    Mobile app should save this session_id and use it for all subsequent /chat calls.
+    """
+    user_id = request.state.user_id  # extracted from JWT by middleware
+    session_id = str(uuid.uuid4())
+
+    engine = _get_or_create_gemini_engine(
         session_id=session_id,
-        reply=greet_text,
-        phase=engine.state.phase,
-        energy_node=None,
-        turn_count=0,
+        user_id=user_id,
+        user_name=user_name,
     )
+    greet_text = engine.greeting(user_name=user_name)
+
+    return {
+        "session_id": session_id,
+        "user_id": user_id,
+        "reply": greet_text,
+        "phase": engine.state.phase if engine.state else "greeting",
+        "energy_node": None,
+        "turn_count": 0,
+    }
 
 
 
@@ -642,18 +771,22 @@ from souli_pipeline.storage import mongo_store as _mongo
 # Maps session_id → GeminiEngine instance
 # One engine per session — holds in-memory state between turns
 _gemini_sessions: Dict[str, GeminiEngine] = {}
- 
- 
-def _get_or_create_gemini_engine(session_id: str) -> GeminiEngine:
+
+
+def _get_or_create_gemini_engine(
+    session_id: str,
+    user_id: int = None,
+    user_name: str = None,
+) -> GeminiEngine:
     """Return existing Gemini engine for session, or create a fresh one."""
     if session_id not in _gemini_sessions:
         engine = GeminiEngine.from_config(_load_config())
-        engine.new_session(session_id)
+        engine.new_session(session_id, user_id=user_id, user_name=user_name)
         _gemini_sessions[session_id] = engine
-        logger.info("Gemini session created: %s", session_id)
+        logger.info("Gemini session created: %s (user_id=%s)", session_id, user_id)
     return _gemini_sessions[session_id]
- 
- 
+
+
 def _load_config():
     """Load pipeline config — reuses same path logic as existing engine setup."""
     from souli_pipeline.config_loader import load_config
@@ -668,18 +801,28 @@ def _load_config():
     summary="[Gemini] Get opening greeting",
 )
 def gemini_greeting(
-    session_id: str = Form(...),
+    request: Request,
     user_name: str = Form(default="buddy"),
 ):
-    engine = _get_or_create_gemini_engine(session_id)
+    user_id = request.state.user_id
+    session_id = str(uuid.uuid4())
+
+    engine = _get_or_create_gemini_engine(
+        session_id=session_id,
+        user_id=user_id,
+        user_name=user_name,
+    )
+
     if engine.state and engine.state.turn_count > 0:
-        engine.new_session(session_id)
-    greeting = engine.greeting(user_name=user_name)
+        engine.new_session(session_id, user_id=user_id, user_name=user_name)
+
+    greeting_text = engine.greeting(user_name=user_name)
     return {
         "session_id": session_id,
-        "greeting":   greeting,
-        "engine":     "gemini",
-        "phase":      "greeting",
+        "user_id": user_id,
+        "greeting": greeting_text,
+        "engine": "gemini",
+        "phase": "greeting",
     }
 
 # ── 2. Gemini Chat ─────────────────────────────────────────────────────────────
@@ -722,29 +865,36 @@ def gemini_chat(req: ChatRequest):    # reuses existing ChatRequest model
  
  
 # ── 3. Gemini Session Reset ────────────────────────────────────────────────────
- 
 @app.post(
     "/gemini/session/reset",
     summary="[Gemini] Reset a Gemini conversation session",
 )
-def gemini_session_reset(session_id: str = Form(...)):
-    """
-    Reset a Gemini session — starts a fresh conversation.
-    Creates a new MongoDB document for the new session.
-    """
-    # Create fresh engine for this session_id
+def gemini_session_reset(
+    request: Request,
+    session_id: str = Form(...),
+):
+    user_id = request.state.user_id
+    user_name = None
+
+    old_engine = _gemini_sessions.get(session_id)
+    if old_engine and old_engine.state:
+        user_name = old_engine.state.user_name
+
+    new_session_id = str(uuid.uuid4())
     engine = GeminiEngine.from_config(_load_config())
-    engine.new_session(session_id)
-    _gemini_sessions[session_id] = engine
- 
-    greeting = engine.greeting()
+    engine.new_session(new_session_id, user_id=user_id, user_name=user_name)
+    _gemini_sessions[new_session_id] = engine
+
+    if session_id in _gemini_sessions:
+        del _gemini_sessions[session_id]
+
+    greeting_text = engine.greeting(user_name=user_name)
     return {
-        "session_id": session_id,
-        "greeting":   greeting,
-        "engine":     "gemini",
-        "status":     "reset",
+        "session_id": new_session_id,
+        "greeting": greeting_text,
+        "engine": "gemini",
+        "status": "reset",
     }
- 
  
 # ── 4. Gemini Session State ────────────────────────────────────────────────────
  

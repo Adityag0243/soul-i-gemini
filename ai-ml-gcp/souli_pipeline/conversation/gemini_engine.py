@@ -62,7 +62,8 @@ class GeminiState:
     """In-memory state for one conversation session."""
 
     session_id: str
-    user_name: str = "buddy"
+    user_id: Optional[int] = None
+    user_name: Optional[str] = "Buddy"
 
     phase:      str = PHASE_GREETING
     turn_count: int = 0
@@ -176,21 +177,36 @@ class GeminiEngine:
     # Session lifecycle
     # ------------------------------------------------------------------ #
 
-    def new_session(self, session_id: Optional[str] = None) -> str:
+    def new_session(
+        self,
+        session_id: Optional[str] = None,
+        user_id: Optional[int] = None,
+        user_name: Optional[str] = "Buddy",
+    ) -> str:
+        """Start a fresh session. Creates MongoDB document. Returns session_id."""
         sid = session_id or _generate_session_id()
-        self.state = GeminiState(session_id=sid)
-        mongo_store.create_session(sid, self.flash_model, self.pro_model)
-        logger.info("[GeminiEngine] new session: %s", sid)
+        self.state = GeminiState(session_id=sid, user_id=user_id, user_name=user_name)
+        mongo_store.create_session(
+            sid, self.flash_model, self.pro_model,
+            user_id=user_id, user_name=user_name,
+        )
+        logger.info("[GeminiEngine] New session: %s (user_id=%s)", sid, user_id)
         return sid
 
-    def reset(self, session_id: Optional[str] = None) -> str:
-        return self.new_session(session_id)
+    def reset(
+        self,
+        session_id: Optional[str] = None,
+        user_id: Optional[int] = None,
+        user_name: Optional[str] = None,
+    ) -> str:
+        """Alias for new_session — same interface as ConversationEngine."""
+        return self.new_session(session_id, user_id=user_id, user_name=user_name)
 
     # ------------------------------------------------------------------ #
     # Greeting
     # ------------------------------------------------------------------ #
 
-    def greeting(self, user_name: str = "buddy") -> str:
+    def greeting(self, user_name: Optional[str] = "buddy") -> str:
         if self.state is None:
             self.new_session()
         self.state.user_name = user_name
