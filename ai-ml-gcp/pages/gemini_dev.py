@@ -151,7 +151,7 @@ st.divider()
 # Main layout: Chat (left) | Debug (right)
 # =============================================================================
 
-chat_col, debug_col = st.columns([3, 4], gap="large")
+chat_col, debug_col = st.columns([4, 4], gap="large")
 
 # ── Session init ──────────────────────────────────────────────────────────────
 if "gemini_turns" not in st.session_state:
@@ -166,14 +166,20 @@ if "gemini_session_started" not in st.session_state:
 # =============================================================================
 
 with chat_col:
-    st.subheader("💬 Gemini Chat")
-
+    st.subheader("💬 Gemini Chat Testing")
+    # import random
+    # #selecting a number between 1 and 1000 to use as a unique session id suffix for this demo
+    # random_num = random.randint(1, 1000)
+    import datetime
+    now = datetime.datetime.now().strftime("%d/%m-%H:%M")
+    default_session_id = f"test-gemini-{now}"
+    
     # ── Start / Reset session ─────────────────────────────────────────────────
     c1, c2 = st.columns([3, 1])
     with c1:
         session_id_input = st.text_input(
             "Session ID",
-            value=st.session_state.get("gemini_session_id", "dev-gemini-001"),
+            value=st.session_state.get("gemini_session_id", default_session_id),
             key="gemini_sid_input",
         )
     with c2:
