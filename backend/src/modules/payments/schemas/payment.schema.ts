@@ -92,6 +92,12 @@ export const resumeSubscriptionSchema = z.object({
 
 export type ResumeSubscriptionInput = z.infer<typeof resumeSubscriptionSchema>;
 
+export const portalSessionSchema = z.object({
+    returnUrl: z.string().url('Invalid return URL'),
+});
+
+export type PortalSessionInput = z.infer<typeof portalSessionSchema>;
+
 export const getSubscriptionHistorySchema = z.object({
     page: z.coerce.number().min(1).default(1),
     pageSize: z.coerce.number().min(1).max(100).default(10),
@@ -159,3 +165,15 @@ export const razorpayWebhookSchema = z.object({
 });
 
 export type RazorpayWebhookInput = z.infer<typeof razorpayWebhookSchema>;
+
+// ============ Coupon Schemas ============
+
+export const couponRedeemSchema = z.object({
+    code: z
+        .string()
+        .min(1)
+        .max(50)
+        .transform((v) => v.toUpperCase()),
+});
+
+export type CouponRedeemInput = z.infer<typeof couponRedeemSchema>;

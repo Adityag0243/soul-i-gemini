@@ -21,18 +21,9 @@ const authRequestSchema = z
     .object({
         headers: z.object({
             authorization: ZodAuthBearer.optional(),
-        }),
+        }).optional(),
         cookies: ZodCookies.optional(),
-    })
-    .refine(
-        (data) =>
-            Boolean(data.headers.authorization) ||
-            Boolean(data.cookies?.accessToken),
-        {
-            message:
-                'Token is required either in Authorization header or in cookies',
-        },
-    );
+    });
 
 export default router.use(
     validator(authRequestSchema, ValidationSource.REQUEST),

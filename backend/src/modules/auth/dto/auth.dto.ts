@@ -1,23 +1,13 @@
-import { RoleCode, AuthProvider } from '@prisma/client';
+import { AuthProvider } from '@prisma/client';
+import { UserDto } from '../../users/dto/user.dto';
 
 export interface AuthTokensDto {
     accessToken: string;
     refreshToken: string;
 }
 
-export interface UserDataDto {
-    id: number;
-    name: string | null;
-    email: string | null;
-    verified: boolean;
-    roles: {
-        id: number;
-        code: RoleCode;
-    }[];
-}
-
 export interface AuthResponseDto {
-    user: UserDataDto;
+    user: UserDto;
     tokens: AuthTokensDto;
 }
 

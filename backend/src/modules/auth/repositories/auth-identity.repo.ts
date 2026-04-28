@@ -9,6 +9,8 @@ export interface CreateAuthIdentityData {
     emailVerified?: boolean;
     providerAccountId?: string;
     souliKeyHash?: string;
+    mobileNumber?: string;
+    mobileVerified?: boolean;
 }
 
 /**
@@ -37,6 +39,21 @@ async function findByProviderAndAccountId(
         where: {
             provider,
             providerAccountId,
+        },
+    });
+}
+
+/**
+ * Find auth identity by provider and mobile number (for MOBILE login/link)
+ */
+async function findByProviderAndMobile(
+    provider: AuthProvider,
+    mobileNumber: string,
+): Promise<AuthIdentity | null> {
+    return prisma.authIdentity.findFirst({
+        where: {
+            provider,
+            mobileNumber,
         },
     });
 }
@@ -78,6 +95,8 @@ async function create(data: CreateAuthIdentityData): Promise<AuthIdentity> {
             emailVerified: data.emailVerified ?? false,
             providerAccountId: data.providerAccountId,
             souliKeyHash: data.souliKeyHash,
+            mobileNumber: data.mobileNumber,
+            mobileVerified: data.mobileVerified ?? false,
         },
     });
 }
@@ -149,6 +168,7 @@ async function linkProvider(
 export default {
     findByProviderAndEmail,
     findByProviderAndAccountId,
+    findByProviderAndMobile,
     findByProviderAndSouliKeyHash,
     findByUserId,
     create,

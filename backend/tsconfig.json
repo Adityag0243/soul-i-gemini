@@ -30,7 +30,7 @@
 {
     "compilerOptions": {
         "target": "ES2022",
-        "module": "commonjs",
+        "module": "nodenext",
         "lib": ["ES2022"],
         "outDir": "./dist",
         "rootDir": "./src",
@@ -39,8 +39,7 @@
         "skipLibCheck": true,
         "forceConsistentCasingInFileNames": true,
         "resolveJsonModule": true,
-        "moduleResolution": "node",
-        //"ignoreDeprecations": "6.0", // Commented out: not needed for TS 5.9+
+        "moduleResolution": "nodenext",
         "declaration": true,
         "declarationMap": true,
         "sourceMap": true,

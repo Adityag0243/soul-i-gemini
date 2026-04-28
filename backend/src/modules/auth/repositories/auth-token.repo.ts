@@ -85,10 +85,27 @@ async function revokeByHash(tokenHash: string): Promise<void> {
     });
 }
 
+// Counts tokens (regardless of revoked) created since `since`. Used as the
+// rate-limit counter for OTP issuance until Phase 16.8 ships proper middleware.
+async function countByUserAndTypeSince(
+    userId: number,
+    tokenType: TokenType,
+    since: Date,
+): Promise<number> {
+    return prisma.authToken.count({
+        where: {
+            userId,
+            tokenType,
+            createdAt: { gte: since },
+        },
+    });
+}
+
 export default {
     create,
     findActiveByHash,
     findActiveByUserAndType,
     revokeByUserAndType,
     revokeByHash,
+    countByUserAndTypeSince,
 };

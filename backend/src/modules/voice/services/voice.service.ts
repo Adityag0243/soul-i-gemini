@@ -228,7 +228,7 @@ export async function createVoiceBootstrap(
         const created = await ChatService.createSession(userId, {
             title: 'Voice Chat',
         });
-        chatSessionId = created.id;
+        chatSessionId = created.session.id;
     }
 
     const tokenResult = await createVoiceToken(userId, {

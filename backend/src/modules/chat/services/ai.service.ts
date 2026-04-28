@@ -1,8 +1,10 @@
+import crypto from 'crypto';
 import {
     ChatMessage,
     MessageRole,
     CrisisLevel,
     PracticeStatus,
+    Prisma,
 } from '@prisma/client';
 import { aiServiceConfig } from '../../../config';
 import logger from '../../../core/logger';
@@ -63,6 +65,12 @@ interface SouliChatResponse {
     phase: string;
     energy_node: string | null;
     turn_count: number;
+    // Optional fields the AI service may emit. Task 2.7 enriches these on the AI side;
+    // backend reads passthrough so once AI returns them they get persisted automatically.
+    secondary_node?: string | null;
+    node_reasoning?: string | null;
+    solution_step?: number | null;
+    rag_sources?: Prisma.InputJsonValue;
 }
 
 export interface AIResponse {
@@ -73,6 +81,10 @@ export interface AIResponse {
     phase?: string;
     energyNode?: string | null;
     turnCount?: number;
+    secondaryNode?: string | null;
+    nodeReasoning?: string | null;
+    solutionStep?: number | null;
+    ragSources?: Prisma.InputJsonValue;
 }
 
 // system prompt for Souli AI - emotional wellness companion
@@ -185,6 +197,18 @@ function buildConversationHistory(
 function buildServiceUrl(path: string): string {
     const base = aiServiceConfig.serviceUrl.replace(/\/$/, '');
     return `${base}${path}`;
+}
+
+function internalHeaders(extra?: Record<string, string>): Record<string, string> {
+    const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'X-Request-Id': crypto.randomUUID(),
+        ...extra,
+    };
+    if (aiServiceConfig.internalApiKey) {
+        headers['X-Internal-API-Key'] = aiServiceConfig.internalApiKey;
+    }
+    return headers;
 }
 
 function shouldTryOllamaCompatibilityFallback(): boolean {
@@ -396,9 +420,7 @@ async function callOllamaAPI(
     try {
         const response = await fetch(`${aiServiceConfig.serviceUrl}/api/chat`, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
+            headers: internalHeaders(),
             body: JSON.stringify(requestBody),
         });
 
@@ -422,6 +444,67 @@ async function callOllamaAPI(
     }
 }
 
+// Shape of AI service GET /session/{session_id}/state response.
+// Fields are optional because Task 2.7 (AI side) is what enriches them; until then
+// only a subset is present. Extra keys are allowed to track AI changes without
+// forcing a backend update.
+export interface SouliSessionState {
+    session_id: string;
+    user_id?: string | null;
+    phase?: string | null;
+    energy_node?: string | null;
+    secondary_node?: string | null;
+    node_reasoning?: string | null;
+    commitment_status?: string | null;
+    solution_step?: number | null;
+    solution_complete?: boolean | null;
+    solution_steps_history?: unknown;
+    three_day_task?: unknown;
+    rag_sources_used?: unknown;
+    turn_count?: number | null;
+    last_updated_at?: string | null;
+    [key: string]: unknown;
+}
+
+export async function getSessionState(
+    sessionId: string,
+): Promise<SouliSessionState> {
+    try {
+        const response = await fetch(
+            buildServiceUrl(
+                `/session/${encodeURIComponent(sessionId)}/state`,
+            ),
+            {
+                method: 'GET',
+                headers: internalHeaders(),
+            },
+        );
+
+        // AI service returns 404 if it has never seen this session (user opened
+        // a brand-new session and hit /ai-state before sending the first message).
+        // Return an empty state rather than propagating 404 — the session does exist
+        // on our side, AI just doesn't have any state for it yet.
+        if (response.status === 404) {
+            return { session_id: sessionId };
+        }
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            logger.error('Souli session state API error:', {
+                status: response.status,
+                error: errorText,
+            });
+            throw new InternalError('AI service unavailable');
+        }
+
+        return (await response.json()) as SouliSessionState;
+    } catch (error) {
+        if (error instanceof InternalError) throw error;
+        logger.error('Souli session state API connection failed:', error);
+        throw new InternalError('AI service connection failed');
+    }
+}
+
 async function callSouliChatAPI(
     userMessage: string,
     sessionId: string,
@@ -434,9 +517,7 @@ async function callSouliChatAPI(
     try {
         const response = await fetch(buildServiceUrl('/chat'), {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
+            headers: internalHeaders(),
             body: JSON.stringify(requestBody),
         });
 
@@ -454,6 +535,128 @@ async function callSouliChatAPI(
         if (error instanceof InternalError) throw error;
         logger.error('Souli chat API connection failed:', error);
         throw new InternalError('AI service connection failed');
+    }
+}
+
+// ── SSE streaming client (T9 — Phase 12.2) ─────────────────────────────────
+
+export interface StreamEvent {
+    event: 'chunk' | 'metadata' | 'done' | 'error';
+    data: Record<string, unknown>;
+}
+
+export async function* callSouliChatStreamAPI(
+    userMessage: string,
+    sessionId: string,
+): AsyncGenerator<StreamEvent> {
+    const requestBody: SouliChatRequest = {
+        message: userMessage,
+        session_id: sessionId,
+    };
+
+    const response = await fetch(buildServiceUrl('/chat/stream'), {
+        method: 'POST',
+        headers: internalHeaders(),
+        body: JSON.stringify(requestBody),
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text();
+        logger.error('Souli stream API error:', {
+            status: response.status,
+            error: errorText,
+        });
+        throw new InternalError('AI stream service unavailable');
+    }
+
+    if (!response.body) {
+        throw new InternalError('AI stream service returned no body');
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    try {
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const parts = buffer.split('\n\n');
+            buffer = parts.pop() || '';
+
+            for (const raw of parts) {
+                if (!raw.trim()) continue;
+                const lines = raw.split('\n');
+                let eventType = '';
+                let data = '';
+                for (const line of lines) {
+                    if (line.startsWith('event: ')) eventType = line.slice(7);
+                    else if (line.startsWith('data: ')) data = line.slice(6);
+                }
+                if (eventType && data) {
+                    try {
+                        yield {
+                            event: eventType as StreamEvent['event'],
+                            data: JSON.parse(data),
+                        };
+                    } catch {
+                        logger.warn('Failed to parse SSE data', { eventType, data });
+                    }
+                }
+            }
+        }
+    } finally {
+        reader.releaseLock();
+    }
+}
+
+// ── Greeting API (personalized session opener) ─────────────────────────────
+
+export interface GreetingResponse {
+    reply: string;
+    phase: string;
+    sessionId: string;
+}
+
+export async function callSouliGreetingAPI(
+    sessionId: string,
+    userName?: string,
+): Promise<GreetingResponse> {
+    const form = new URLSearchParams();
+    form.append('session_id', sessionId);
+    form.append('user_name', userName || 'buddy');
+
+    try {
+        const response = await fetch(buildServiceUrl('/session/greeting'), {
+            method: 'POST',
+            headers: {
+                ...internalHeaders(),
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: form.toString(),
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            logger.error('Souli greeting API error:', {
+                status: response.status,
+                error: errorText,
+            });
+            throw new InternalError('AI greeting service unavailable');
+        }
+
+        const data = (await response.json()) as SouliChatResponse;
+        return {
+            reply: data.reply,
+            phase: data.phase,
+            sessionId: data.session_id,
+        };
+    } catch (error) {
+        if (error instanceof InternalError) throw error;
+        logger.error('Souli greeting API connection failed:', error);
+        throw new InternalError('AI greeting service connection failed');
     }
 }
 
@@ -483,8 +686,14 @@ export async function callSouliVoiceAPI(params: {
         fileName,
     );
 
+    const voiceHeaders: Record<string, string> = {};
+    if (aiServiceConfig.internalApiKey) {
+        voiceHeaders['X-Internal-API-Key'] = aiServiceConfig.internalApiKey;
+    }
+
     const response = await fetch(buildServiceUrl('/voice'), {
         method: 'POST',
+        headers: voiceHeaders,
         body: form,
     });
 
@@ -538,6 +747,10 @@ export async function generateResponse(
             phase: response.phase,
             energyNode: response.energy_node,
             turnCount: response.turn_count,
+            secondaryNode: response.secondary_node,
+            nodeReasoning: response.node_reasoning,
+            solutionStep: response.solution_step,
+            ragSources: response.rag_sources,
         };
     } catch (error) {
         if (!shouldTryOllamaCompatibilityFallback()) {
@@ -626,9 +839,7 @@ export async function healthCheck(): Promise<boolean> {
     try {
         const primary = await fetch(`${aiServiceConfig.serviceUrl}/health`, {
             method: 'GET',
-            headers: {
-                'Content-Type': 'application/json',
-            },
+            headers: internalHeaders(),
         });
 
         if (primary.ok) return true;
@@ -639,9 +850,7 @@ export async function healthCheck(): Promise<boolean> {
     try {
         const fallback = await fetch(`${aiServiceConfig.serviceUrl}/api/tags`, {
             method: 'GET',
-            headers: {
-                'Content-Type': 'application/json',
-            },
+            headers: internalHeaders(),
         });
         return fallback.ok;
     } catch {
@@ -651,6 +860,9 @@ export async function healthCheck(): Promise<boolean> {
 
 export default {
     generateResponse,
+    getSessionState,
+    callSouliGreetingAPI,
+    callSouliChatStreamAPI,
     healthCheck,
     detectCrisisLevel,
     detectEmotion,

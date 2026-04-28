@@ -102,6 +102,43 @@ async function update(
 }
 
 /**
+ * Mirror metadata from a freshly-saved assistant message onto the session row.
+ * Skips fields that are `undefined` (preserves prior value); accepts `null` as
+ * "clear this field". `tokensUsed` is added to `totalTokensUsed`. Always touches
+ * `lastActivityAt` since an assistant reply always counts as activity.
+ */
+export interface AssistantMessageMetadata {
+    phase?: string | null;
+    energyNode?: string | null;
+    secondaryNode?: string | null;
+    solutionStep?: number | null;
+    tokensUsed?: number;
+}
+
+async function applyAssistantMessageMetadata(
+    sessionId: string,
+    metadata: AssistantMessageMetadata,
+): Promise<ChatSession> {
+    const data: Prisma.ChatSessionUpdateInput = {
+        lastActivityAt: new Date(),
+    };
+    if (metadata.phase !== undefined) data.phase = metadata.phase;
+    if (metadata.energyNode !== undefined) data.energyNode = metadata.energyNode;
+    if (metadata.secondaryNode !== undefined)
+        data.secondaryNode = metadata.secondaryNode;
+    if (metadata.solutionStep !== undefined)
+        data.solutionStep = metadata.solutionStep;
+    if (metadata.tokensUsed && metadata.tokensUsed > 0) {
+        data.totalTokensUsed = { increment: metadata.tokensUsed };
+    }
+
+    return prisma.chatSession.update({
+        where: { id: sessionId },
+        data,
+    });
+}
+
+/**
  * Archive chat session
  */
 async function archive(id: string): Promise<ChatSession> {
@@ -163,6 +200,7 @@ export default {
     findByIdAndUserId,
     findByUserId,
     update,
+    applyAssistantMessageMetadata,
     archive,
     remove,
     countActiveSessions,

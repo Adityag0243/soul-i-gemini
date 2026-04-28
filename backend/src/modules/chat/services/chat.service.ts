@@ -7,19 +7,28 @@ import {
     FeatureKey,
 } from '@prisma/client';
 import { prisma } from '../../../database';
-import { BadRequestError, NotFoundError } from '../../../core/api-error';
+import {
+    BadRequestError,
+    NotFoundError,
+    PaymentRequiredError,
+} from '../../../core/api-error';
 import logger from '../../../core/logger';
+import { subscriptionRepository } from '../../../database/repositories/subscription.repo';
 import ChatSessionRepo from '../repositories/chat-session.repo';
 import ChatMessageRepo from '../repositories/chat-message.repo';
-import AIService from './ai.service';
+import AIService, { SouliSessionState, StreamEvent } from './ai.service';
 import FeatureControlService from '../../admin-panel/featureControl/services/feature-control.service';
 import {
     ChatSessionDto,
     ChatMessageDto,
+    CreateSessionResponseDto,
+    FreeTierStatusDto,
     SendMessageResponseDto,
     SaveVoiceTranscriptResponseDto,
     SessionListResponseDto,
     MessageListResponseDto,
+    FreeSessionStatusDto,
+    SessionCompletionDto,
 } from '../dto/chat.dto';
 import {
     CreateSessionInput,
@@ -45,15 +54,46 @@ function toSessionDto(session: SessionWithCount): ChatSessionDto {
     };
 }
 
-function toMessageDto(message: ChatMessage): ChatMessageDto {
+function toMessageDto(
+    message: ChatMessage,
+    session: ChatSession,
+): ChatMessageDto {
     return {
         id: message.id,
         sessionId: message.sessionId,
         role: message.role,
         content: message.content,
+        createdAt: message.createdAt,
         tokenCount: message.tokenCount,
         crisisLevel: message.crisisLevel,
-        createdAt: message.createdAt,
+        detectedEmotion: message.detectedEmotion,
+        phase: message.phase,
+        energyNode: message.energyNode,
+        secondaryNode: message.secondaryNode,
+        nodeReasoning: message.nodeReasoning,
+        turnCount: message.turnCount,
+        solutionStep: message.solutionStep,
+        ragSources: message.ragSources,
+        // Session-level signals denormalized onto the message (D5)
+        isSolutionComplete: session.solutionComplete,
+        threeDayTask: session.threeDayTask,
+        audioUrl: message.audioUrl,
+        durationMs: message.durationMs,
+    };
+}
+
+async function buildFreeTierStatus(
+    userId: number,
+    session: ChatSession,
+): Promise<FreeTierStatusDto> {
+    const user = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    return {
+        used: user.freeSessionsCompleted,
+        total: 3,
+        isComplete: session.isComplete,
+        showCouponPopup:
+            user.freeSessionsCompleted >= 3 &&
+            !user.couponPopupShown,
     };
 }
 
@@ -63,7 +103,18 @@ function toMessageDto(message: ChatMessage): ChatMessageDto {
 export async function createSession(
     userId: number,
     input: CreateSessionInput,
-): Promise<ChatSessionDto> {
+): Promise<CreateSessionResponseDto> {
+    // D12: block session creation when free tier exhausted and no active subscription.
+    const user = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    if (user.freeSessionsCompleted >= 3) {
+        const hasPaid = await subscriptionRepository.hasActivePaidSubscription(userId);
+        if (!hasPaid) {
+            throw new PaymentRequiredError(
+                'Free session limit reached — subscribe to continue',
+            );
+        }
+    }
+
     const session = await ChatSessionRepo.create({
         userId,
         title: input.title,
@@ -71,12 +122,36 @@ export async function createSession(
 
     logger.info('Chat session created', { sessionId: session.id, userId });
 
-    // track analytics event
     await trackAnalyticsEvent(userId, 'session_created', {
         sessionId: session.id,
     });
 
-    return toSessionDto(session);
+    // Fetch personalized greeting from AI service and persist it as the
+    // first assistant message so mobile gets it in one round-trip.
+    let greetingMessage: ChatMessageDto | null = null;
+    try {
+        const greeting = await AIService.callSouliGreetingAPI(
+            session.id,
+            user.callName || undefined,
+        );
+        const msg = await ChatMessageRepo.create({
+            sessionId: session.id,
+            role: MessageRole.ASSISTANT,
+            content: greeting.reply,
+            phase: greeting.phase,
+        });
+        greetingMessage = toMessageDto(msg, session);
+    } catch (error) {
+        logger.warn('AI greeting failed — session created without greeting', {
+            sessionId: session.id,
+            error,
+        });
+    }
+
+    return {
+        session: toSessionDto(session),
+        greetingMessage,
+    };
 }
 
 // get all chat sessions for a user
@@ -227,6 +302,22 @@ export async function sendMessage(
         await trackAnalyticsEvent(userId, 'chat_started', { sessionId });
     }
 
+    // D12: Mark session complete on 3rd user message and increment free-tier counter.
+    const userMessageCount = await ChatMessageRepo.countUserMessagesBySessionId(sessionId);
+    if (userMessageCount >= 3 && !session.isComplete) {
+        await prisma.$transaction([
+            prisma.chatSession.update({
+                where: { id: sessionId },
+                data: { isComplete: true },
+            }),
+            prisma.user.update({
+                where: { id: userId },
+                data: { freeSessionsCompleted: { increment: 1 } },
+            }),
+        ]);
+        logger.info('Session marked complete (3rd user message)', { sessionId, userId });
+    }
+
     // generate AI response
     const aiResponse = await AIService.generateResponse(
         conversationHistory,
@@ -234,13 +325,22 @@ export async function sendMessage(
         sessionId,
     );
 
-    // save assistant message
+    // save assistant message — persist all AI metadata so we can serve it back
+    // without re-asking AI, and so insights/cron jobs can query on it.
     const assistantMessage = await ChatMessageRepo.create({
         sessionId,
         role: MessageRole.ASSISTANT,
         content: aiResponse.content,
         tokenCount: aiResponse.tokenCount,
         crisisLevel: aiResponse.crisisLevel,
+        phase: aiResponse.phase,
+        energyNode: aiResponse.energyNode,
+        secondaryNode: aiResponse.secondaryNode,
+        nodeReasoning: aiResponse.nodeReasoning,
+        turnCount: aiResponse.turnCount,
+        solutionStep: aiResponse.solutionStep,
+        ragSources: aiResponse.ragSources,
+        detectedEmotion: aiResponse.detectedEmotion,
     });
 
     logger.info('Assistant message saved', {
@@ -248,6 +348,25 @@ export async function sendMessage(
         messageId: assistantMessage.id,
         crisisLevel: aiResponse.crisisLevel,
     });
+
+    // Mirror AI state onto the session row so GET /sessions/{id} can serve
+    // the latest phase/energyNode/etc. without scanning messages, and so
+    // cron jobs (Phase 9 auto-archive, Phase 11 insights) can filter on
+    // lastActivityAt directly.
+    try {
+        await ChatSessionRepo.applyAssistantMessageMetadata(sessionId, {
+            phase: aiResponse.phase,
+            energyNode: aiResponse.energyNode,
+            secondaryNode: aiResponse.secondaryNode,
+            solutionStep: aiResponse.solutionStep,
+            tokensUsed: aiResponse.tokenCount,
+        });
+    } catch (error) {
+        logger.error('Failed to mirror AI metadata onto session', {
+            sessionId,
+            error,
+        });
+    }
 
     // Handle crisis detection
     if (
@@ -279,27 +398,17 @@ export async function sendMessage(
         }
     }
 
-    const expertEscalationEnabled =
-        await FeatureControlService.isFeatureEnabled(
-            FeatureKey.EXPERT_ESCALATION,
-        );
-    const shouldEscalateToExpert =
-        expertEscalationEnabled &&
-        (aiResponse.crisisLevel === CrisisLevel.MEDIUM ||
-            aiResponse.crisisLevel === CrisisLevel.HIGH);
+    // Re-fetch the session so the response reflects the just-mirrored AI state
+    // and any title update.
+    const updatedSession =
+        (await ChatSessionRepo.findById(sessionId)) ?? session;
 
     return {
-        userMessage: toMessageDto(userMessage),
-        assistantMessage: toMessageDto(assistantMessage),
-        detectedEmotion: aiResponse.detectedEmotion,
-        crisisLevel: aiResponse.crisisLevel,
-        expertEscalationEnabled,
-        shouldEscalateToExpert,
-        phase: aiResponse.phase,
-        energyNode: aiResponse.energyNode,
-        turnCount: aiResponse.turnCount,
-        energy_node: aiResponse.energyNode,
-        turn_count: aiResponse.turnCount,
+        userMessage: toMessageDto(userMessage, updatedSession),
+        aiMessage: toMessageDto(assistantMessage, updatedSession),
+        session: toSessionDto(updatedSession),
+        crisisResources: null,
+        freeTier: await buildFreeTierStatus(userId, updatedSession),
     };
 }
 
@@ -373,13 +482,26 @@ export async function saveVoiceTranscript(
     });
 
     return {
-        userMessage: toMessageDto(userMessage),
-        assistantMessage: assistantMessage
-            ? toMessageDto(assistantMessage)
+        userMessage: toMessageDto(userMessage, session),
+        aiMessage: assistantMessage
+            ? toMessageDto(assistantMessage, session)
             : null,
-        detectedEmotion: input.detectedEmotion,
-        crisisLevel: userCrisisLevel,
+        session: toSessionDto(session),
     };
+}
+
+// Proxy AI session state. Verifies ownership on our side, then forwards to AI
+// service GET /session/{id}/state. Response shape is whatever AI returns —
+// kept passthrough so Task 2.7 (AI enrichment) doesn't require a backend change.
+export async function getSessionAiState(
+    sessionId: string,
+    userId: number,
+): Promise<SouliSessionState> {
+    const session = await ChatSessionRepo.findByIdAndUserId(sessionId, userId);
+    if (!session) {
+        throw new NotFoundError('Chat session not found');
+    }
+    return AIService.getSessionState(sessionId);
 }
 
 // get messages for a session
@@ -405,7 +527,7 @@ export async function getMessages(
     const total = await ChatMessageRepo.countBySessionId(sessionId);
 
     return {
-        messages: messages.map(toMessageDto),
+        messages: messages.map((m) => toMessageDto(m, session)),
         total,
         sessionId,
     };
@@ -497,6 +619,165 @@ async function trackAnalyticsEvent(
     }
 }
 
+export async function getFreeTierStatus(userId: number) {
+    const user = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    const hasPaid = await subscriptionRepository.hasActivePaidSubscription(userId);
+    return {
+        used: user.freeSessionsCompleted,
+        total: 3,
+        blocked: user.freeSessionsCompleted >= 3 && !hasPaid,
+        showCouponPopup: user.freeSessionsCompleted >= 3 && !user.couponPopupShown,
+    };
+}
+
+export async function acknowledgeCouponPopup(userId: number): Promise<void> {
+    await prisma.user.update({
+        where: { id: userId },
+        data: { couponPopupShown: true },
+    });
+}
+
+// ── SSE streaming send (T9 — Phase 12.2) ───────────────────────────────────
+
+export interface SSEFrame {
+    event: string;
+    data: unknown;
+}
+
+export async function* sendMessageStream(
+    userId: number,
+    input: SendMessageInput,
+): AsyncGenerator<SSEFrame> {
+    const { sessionId, content } = input;
+
+    const session = await ChatSessionRepo.findByIdAndUserId(sessionId, userId);
+    if (!session) throw new NotFoundError('Chat session not found');
+    if (session.isArchived)
+        throw new BadRequestError('Cannot send messages to archived session');
+
+    const userCrisisLevel = AIService.detectCrisisLevel(content);
+    const detectedEmotion = AIService.detectEmotion(content);
+
+    const userMessage = await ChatMessageRepo.create({
+        sessionId,
+        role: MessageRole.USER,
+        content,
+        crisisLevel: userCrisisLevel,
+    });
+
+    const messageCount = await ChatMessageRepo.countBySessionId(sessionId);
+    if (messageCount === 1) {
+        await trackAnalyticsEvent(userId, 'chat_started', { sessionId });
+    }
+
+    const userMessageCount =
+        await ChatMessageRepo.countUserMessagesBySessionId(sessionId);
+    if (userMessageCount >= 3 && !session.isComplete) {
+        await prisma.$transaction([
+            prisma.chatSession.update({
+                where: { id: sessionId },
+                data: { isComplete: true },
+            }),
+            prisma.user.update({
+                where: { id: userId },
+                data: { freeSessionsCompleted: { increment: 1 } },
+            }),
+        ]);
+    }
+
+    let fullReply = '';
+    let metadata: Record<string, unknown> = {};
+
+    try {
+        for await (const evt of AIService.callSouliChatStreamAPI(
+            content,
+            sessionId,
+        )) {
+            if (evt.event === 'chunk') {
+                fullReply += (evt.data as { text: string }).text;
+                yield { event: 'chunk', data: evt.data };
+            } else if (evt.event === 'metadata') {
+                metadata = evt.data;
+                yield { event: 'metadata', data: evt.data };
+            } else if (evt.event === 'error') {
+                yield { event: 'error', data: evt.data };
+                return;
+            }
+        }
+    } catch (error) {
+        logger.error('AI stream failed, falling back', { sessionId, error });
+        yield {
+            event: 'error',
+            data: { message: 'AI stream service unavailable' },
+        };
+        return;
+    }
+
+    const assistantMessage = await ChatMessageRepo.create({
+        sessionId,
+        role: MessageRole.ASSISTANT,
+        content: fullReply,
+        crisisLevel: userCrisisLevel,
+        detectedEmotion,
+        phase: (metadata.phase as string) ?? undefined,
+        energyNode: (metadata.energy_node as string) ?? undefined,
+        secondaryNode: (metadata.secondary_node as string) ?? undefined,
+        nodeReasoning: (metadata.node_reasoning as string) ?? undefined,
+        turnCount: (metadata.turn_count as number) ?? undefined,
+        solutionStep: (metadata.solution_step as number) ?? undefined,
+    });
+
+    try {
+        await ChatSessionRepo.applyAssistantMessageMetadata(sessionId, {
+            phase: (metadata.phase as string) ?? undefined,
+            energyNode: (metadata.energy_node as string) ?? undefined,
+            secondaryNode: (metadata.secondary_node as string) ?? undefined,
+            solutionStep: (metadata.solution_step as number) ?? undefined,
+        });
+    } catch (error) {
+        logger.error('Failed to mirror stream metadata onto session', {
+            sessionId,
+            error,
+        });
+    }
+
+    if (
+        userCrisisLevel === CrisisLevel.HIGH ||
+        userCrisisLevel === CrisisLevel.MEDIUM
+    ) {
+        await handleCrisisEvent(
+            userId,
+            sessionId,
+            userMessage.id,
+            userCrisisLevel,
+        );
+    }
+
+    if (detectedEmotion) {
+        await storeEmotionalState(userId, sessionId, detectedEmotion);
+    }
+
+    if (session.title === 'New Chat' && messageCount <= 2) {
+        const newTitle = await generateSessionTitle(content);
+        if (newTitle) {
+            await ChatSessionRepo.update(sessionId, { title: newTitle });
+        }
+    }
+
+    const updatedSession =
+        (await ChatSessionRepo.findById(sessionId)) ?? session;
+
+    yield {
+        event: 'done',
+        data: {
+            userMessage: toMessageDto(userMessage, updatedSession),
+            aiMessage: toMessageDto(assistantMessage, updatedSession),
+            session: toSessionDto(updatedSession),
+            freeTier: await buildFreeTierStatus(userId, updatedSession),
+        },
+    };
+}
+
 export default {
     createSession,
     getSessions,
@@ -505,6 +786,10 @@ export default {
     archiveSession,
     deleteSession,
     sendMessage,
+    sendMessageStream,
     saveVoiceTranscript,
     getMessages,
+    getSessionAiState,
+    getFreeTierStatus,
+    acknowledgeCouponPopup,
 };
