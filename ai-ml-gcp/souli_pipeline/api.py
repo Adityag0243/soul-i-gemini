@@ -447,13 +447,12 @@ def get_session_state(session_id: str):
 # ── 6. Greeting (convenience for first-open in mobile app) ───────────────────
 
 @app.post("/session/greeting", response_model=ChatResponse, summary="Get opening greeting for a new session")
-def greeting(session_id: str = Form(...)):
-    """
-    Get Souli's opening greeting for a brand new session.
-    Call this when the user opens the app for the first time or after a reset.
-    """
-    engine = _get_or_create_gemini_engine(session_id)  # <-- use Gemini engine for greeting as well
-    greet_text = engine.greeting()
+def greeting(
+    session_id: str = Form(...),
+    user_name: str = Form(default="buddy"),
+):
+    engine = _get_or_create_gemini_engine(session_id)
+    greet_text = engine.greeting(user_name=user_name)
     return ChatResponse(
         session_id=session_id,
         reply=greet_text,
@@ -493,33 +492,28 @@ def _load_config():
  
  
 # ── 1. Gemini Greeting ─────────────────────────────────────────────────────────
- 
+
 @app.post(
     "/gemini/session/greeting",
     summary="[Gemini] Get opening greeting",
 )
-def gemini_greeting(session_id: str = Form(...)):
-    """
-    Start a new Gemini session and get the opening greeting.
-    Creates a fresh session in memory and MongoDB.
-    """
+def gemini_greeting(
+    session_id: str = Form(...),
+    user_name: str = Form(default="buddy"),
+):
     engine = _get_or_create_gemini_engine(session_id)
- 
-    # If session already has turns, reset it for a fresh start
     if engine.state and engine.state.turn_count > 0:
         engine.new_session(session_id)
- 
-    greeting = engine.greeting()
+    greeting = engine.greeting(user_name=user_name)
     return {
         "session_id": session_id,
         "greeting":   greeting,
         "engine":     "gemini",
         "phase":      "greeting",
     }
- 
- 
+
 # ── 2. Gemini Chat ─────────────────────────────────────────────────────────────
- 
+
 @app.post(
     "/gemini/chat",
     response_model=ChatResponse,       # reuses existing ChatResponse model
