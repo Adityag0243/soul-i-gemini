@@ -27,8 +27,6 @@ from typing import Any, Dict, List, Optional
 from souli_pipeline.llm.gemini import GeminiLLM
 from souli_pipeline.conversation.gemini_prompts import (
     PRE_SOLUTION_SYSTEM,
-    SOLUTION_SYSTEM,
-    build_solution_context,
     build_greeting_context,
 )
 from souli_pipeline.storage import mongo_store
@@ -46,6 +44,7 @@ PHASE_METACOGNITION = "metacognition"
 PHASE_COMMITMENT    = "commitment_check"
 PHASE_SOLUTION      = "solution"
 PHASE_COMPLETE      = "solution_complete"
+PHASE_PRESCRIPTION  = "prescription"
 
 
 _DEFAULT_FLASH = os.environ.get("GEMINI_FLASH_MODEL", "gemini-2.5-flash")
@@ -90,10 +89,15 @@ class GeminiState:
 
     # Solution phase tracking.
     solution_active:        bool = False
-    solution_step:          int  = 1
     solution_rag_chunks:    List[Dict] = field(default_factory=list)
-    solution_steps_history: List[Dict] = field(default_factory=list)
     solution_complete:      bool = False
+    solution_substep:       str            = "awaiting_chanting_answer"
+    chanting_ok:            Optional[bool] = None
+    practice_chosen:        Optional[Dict] = None
+    setup_confirmed:        bool           = False
+    practice_done:          bool           = False
+    reflection_text:        str            = ""
+    prescription_delivered: bool           = False
 
     # Mongo turn counter is independent of LLM turn count because greeting
     # and assistant-only events also produce mongo records.
@@ -235,10 +239,18 @@ class GeminiEngine:
         self._mongo_append(role="user", phase=s.phase, content=user_text)
 
         t0 = time.time()
-        if s.phase == PHASE_SOLUTION or s.solution_active:
-            reply, extra = self._handle_solution_step(user_text)
+        if s.solution_active and s.phase != PHASE_COMPLETE:
+            from souli_pipeline.conversation.solution_engine import handle_solution_turn
+            reply, extra = handle_solution_turn(
+                state        = s,
+                user_text    = user_text,
+                llm_pro      = self._pro(),
+                llm_flash    = self._flash(),
+                fetch_rag_fn = self._fetch_solution_rag,
+            )
         else:
             reply, extra = self._handle_pre_solution(user_text)
+
         extra.setdefault("elapsed_ms", int((time.time() - t0) * 1000))
 
         s.messages.append({"role": "assistant", "content": reply})
@@ -354,13 +366,16 @@ class GeminiEngine:
 
         # Transition into solution phase.
         if new_phase == PHASE_SOLUTION or commitment_result == "seeking_solution":
-            s.phase           = PHASE_SOLUTION
-            s.solution_active = True
-            s.solution_rag_chunks = self._fetch_solution_rag()
-            logger.info(
-                "[GeminiEngine] solution start - node=%s rag_chunks=%d",
-                s.energy_node, len(s.solution_rag_chunks),
+            s.phase            = PHASE_SOLUTION
+            s.solution_active  = True
+            s.solution_substep = "awaiting_chanting_answer"
+            reply = (
+                "Before we begin, one quick check — are you comfortable with "
+                "practices that include chanting (like OM or a mantra), or would "
+                "you prefer something without chanting? Just let me know and I'll "
+                "pick accordingly."
             )
+            logger.info("[GeminiEngine] solution preflight emitted")
 
         extra = {
             "gemini_phase_decision": new_phase,
@@ -379,95 +394,95 @@ class GeminiEngine:
     # Solution flow (multi-step practice delivery)
     # ------------------------------------------------------------------ #
 
-    def _handle_solution_step(self, user_text: str):
-        s = self.state
+    # def _handle_solution_step(self, user_text: str):
+    #     s = self.state
 
-        if s.solution_steps_history:
-            s.solution_steps_history[-1]["user_reply"] = user_text
+    #     if s.solution_steps_history:
+    #         s.solution_steps_history[-1]["user_reply"] = user_text
 
-        context = build_solution_context(
-            energy_node     = s.energy_node or "blocked_energy",
-            secondary_node  = s.secondary_node,
-            node_reasoning  = s.node_reasoning,
-            summary_text    = s.summary_text,
-            rag_chunks      = s.solution_rag_chunks,
-            current_step    = s.solution_step,
-            steps_so_far    = s.solution_steps_history,
-            user_last_reply = user_text,
-        )
+    #     context = build_solution_context(
+    #         energy_node     = s.energy_node or "blocked_energy",
+    #         secondary_node  = s.secondary_node,
+    #         node_reasoning  = s.node_reasoning,
+    #         summary_text    = s.summary_text,
+    #         rag_chunks      = s.solution_rag_chunks,
+    #         current_step    = s.solution_step,
+    #         steps_so_far    = s.solution_steps_history,
+    #         user_last_reply = user_text,
+    #     )
 
-        # Pro is more sensitive to JSON formatting under pressure; one retry
-        # is enough in practice.
-        result = None
-        for attempt in range(2):
-            try:
-                result = self._pro().chat_json(
-                    system=SOLUTION_SYSTEM,
-                    messages=[{"role": "user", "content": context}],
-                )
-                break
-            except Exception as exc:
-                if attempt == 1:
-                    logger.error("[GeminiEngine] pro solution step failed: %s", exc)
-                    return (
-                        "Let's take one gentle breath together. What are you feeling right now?",
-                        {"error": str(exc), "phase": PHASE_SOLUTION},
-                    )
-                logger.warning("[GeminiEngine] pro retry: %s", exc)
-                time.sleep(0.5)
+    #     # Pro is more sensitive to JSON formatting under pressure; one retry
+    #     # is enough in practice.
+    #     result = None
+    #     for attempt in range(2):
+    #         try:
+    #             result = self._pro().chat_json(
+    #                 system=SOLUTION_SYSTEM,
+    #                 messages=[{"role": "user", "content": context}],
+    #             )
+    #             break
+    #         except Exception as exc:
+    #             if attempt == 1:
+    #                 logger.error("[GeminiEngine] pro solution step failed: %s", exc)
+    #                 return (
+    #                     "Let's take one gentle breath together. What are you feeling right now?",
+    #                     {"error": str(exc), "phase": PHASE_SOLUTION},
+    #                 )
+    #             logger.warning("[GeminiEngine] pro retry: %s", exc)
+    #             time.sleep(0.5)
 
-        step_id         = result.get("step_id", f"step_{s.solution_step}")
-        content         = (result.get("content") or "").strip()
-        is_final        = bool(result.get("is_final_step"))
-        decision_basis  = result.get("decision_basis", "")
-        conclusion_task = result.get("conclusion_task")
-        motivation      = result.get("motivation")
+    #     step_id         = result.get("step_id", f"step_{s.solution_step}")
+    #     content         = (result.get("content") or "").strip()
+    #     is_final        = bool(result.get("is_final_step"))
+    #     decision_basis  = result.get("decision_basis", "")
+    #     conclusion_task = result.get("conclusion_task")
+    #     motivation      = result.get("motivation")
 
-        if not content:
-            content = "Take a deep breath. What are you noticing right now?"
+    #     if not content:
+    #         content = "Take a deep breath. What are you noticing right now?"
 
-        if s.solution_steps_history:
-            s.solution_steps_history[-1]["decision_taken"] = decision_basis
+    #     if s.solution_steps_history:
+    #         s.solution_steps_history[-1]["decision_taken"] = decision_basis
 
-        step_record = {
-            "step_id":         step_id,
-            "delivered_at":    _now(),
-            "content":         content,
-            "user_reply":      None,
-            "decision_basis":  decision_basis,
-            "decision_taken":  None,
-            "conclusion_task": conclusion_task,
-            "motivation":      motivation,
-        }
-        s.solution_steps_history.append(step_record)
-        s.solution_step += 1
+    #     step_record = {
+    #         "step_id":         step_id,
+    #         "delivered_at":    _now(),
+    #         "content":         content,
+    #         "user_reply":      None,
+    #         "decision_basis":  decision_basis,
+    #         "decision_taken":  None,
+    #         "conclusion_task": conclusion_task,
+    #         "motivation":      motivation,
+    #     }
+    #     s.solution_steps_history.append(step_record)
+    #     s.solution_step += 1
 
-        if is_final:
-            s.solution_complete = True
-            s.phase = PHASE_COMPLETE
+    #     if is_final:
+    #         s.solution_complete = True
+    #         s.phase = PHASE_COMPLETE
 
-        extra = {
-            "solution_journey": {
-                "current_step":  s.solution_step - 1,
-                "is_final_step": is_final,
-                "step_data":     step_record,
-                "rag_sources": (
-                    [c.get("source_video", "") for c in s.solution_rag_chunks[:4]]
-                    if s.solution_step == 2 else None
-                ),
-            },
-            "internal_logic": {
-                "tool_call": {
-                    "name":      "query_activities_qdrant",
-                    "arguments": {"node": s.energy_node, "query": "grounding and focus"},
-                    "output": {
-                        "chunks_retrieved": len(s.solution_rag_chunks),
-                        "sources": [c.get("source_video", "") for c in s.solution_rag_chunks[:3]],
-                    },
-                } if s.solution_step == 2 else None,
-            },
-        }
-        return content, extra
+    #     extra = {
+    #         "solution_journey": {
+    #             "current_step":  s.solution_step - 1,
+    #             "is_final_step": is_final,
+    #             "step_data":     step_record,
+    #             "rag_sources": (
+    #                 [c.get("source_video", "") for c in s.solution_rag_chunks[:4]]
+    #                 if s.solution_step == 2 else None
+    #             ),
+    #         },
+    #         "internal_logic": {
+    #             "tool_call": {
+    #                 "name":      "query_activities_qdrant",
+    #                 "arguments": {"node": s.energy_node, "query": "grounding and focus"},
+    #                 "output": {
+    #                     "chunks_retrieved": len(s.solution_rag_chunks),
+    #                     "sources": [c.get("source_video", "") for c in s.solution_rag_chunks[:3]],
+    #                 },
+    #             } if s.solution_step == 2 else None,
+    #         },
+    #     }
+    #     return content, extra
 
     # ------------------------------------------------------------------ #
     # Energy classification (Gemini Flash, runs once per session)

@@ -307,23 +307,8 @@ with debug_col:
             if engine.state and engine.state.solution_active:
                 st.divider()
                 st.markdown("##### 🧘 Solution Phase")
-                st.metric("Current step", engine.state.solution_step - 1)
+                # st.metric("Current step", engine.state.solution_step - 1)
                 st.metric("RAG chunks",   len(engine.state.solution_rag_chunks))
-
-                if engine.state.solution_steps_history:
-                    st.markdown("**Steps so far:**")
-                    for step in engine.state.solution_steps_history:
-                        with st.expander(
-                            f"{step.get('step_id', '?')} — {step.get('content', '')[:60]}...",
-                            expanded=False,
-                        ):
-                            st.markdown(f"**Content:** {step.get('content', '')}")
-                            st.markdown(f"**User reply:** {step.get('user_reply') or '_waiting_'}")
-                            st.markdown(f"**Decision basis:** _{step.get('decision_basis', '')}_")
-                            if step.get("conclusion_task"):
-                                st.success(f"**Task:** {step['conclusion_task']}")
-                            if step.get("motivation"):
-                                st.info(f"**Closing:** {step['motivation']}")
 
                 # RAG chunks used
                 if engine.state.solution_rag_chunks:
