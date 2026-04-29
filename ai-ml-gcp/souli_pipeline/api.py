@@ -306,9 +306,10 @@ class SessionState(BaseModel):
     turn_count: int
     intent: Optional[str] = None
     user_name: Optional[str] = None
-    solution_step: Optional[int] = None
+    # solution_step: Optional[int] = None
+    solution_substep: Optional[str] = None
     solution_complete: bool = False
-    solution_steps_history: List[Dict[str, Any]] = []
+    # solution_steps_history: List[Dict[str, Any]] = []
     three_day_task: Optional[Any] = None  # populated by Phase 13 webhook flow
     rag_sources_used: List[Dict[str, Any]] = []
     last_updated_at: Optional[str] = None
@@ -397,7 +398,7 @@ async def chat_stream(req: ChatRequest):
 
     Events emitted (one per SSE frame):
       - **chunk**:    `{"text": "..."}` — incremental reply text
-      - **metadata**: `{phase, energy_node, secondary_node, node_reasoning, turn_count, solution_step, solution_complete}` — AI metadata after full reply
+      - **metadata**: `{phase, energy_node, secondary_node, node_reasoning, turn_count, solution_substep, solution_complete}` — AI metadata after full reply
       - **done**:     `{"session_id": "...", "full_reply": "..."}` — stream complete
       - **error**:    `{"message": "..."}` — on failure (terminal)
     """
@@ -421,7 +422,8 @@ async def chat_stream(req: ChatRequest):
                 "secondary_node": diag.get("secondary_node"),
                 "node_reasoning": diag.get("node_reasoning"),
                 "turn_count": diag.get("turn_count", 0),
-                "solution_step": engine.state.solution_step if engine.state else None,
+                # "solution_step": engine.state.solution_step if engine.state else None,
+                "solution_substep": engine.state.solution_substep if engine.state else None,
                 "solution_complete": engine.state.solution_complete if engine.state else False,
             }
             yield f"event: metadata\ndata: {_json.dumps(metadata)}\n\n"
@@ -602,9 +604,10 @@ def get_session_state(session_id: str):
             turn_count=state.turn_count if state else 0,
             intent=None,      # gemini engine doesn't track intent
             user_name=None,   # gemini engine doesn't track user_name
-            solution_step=state.solution_step if state else None,
+            # solution_step=state.solution_step if state else None,
+            solution_substep=state.solution_substep if state else None,
             solution_complete=state.solution_complete if state else False,
-            solution_steps_history=state.solution_steps_history if state else [],
+            # solution_steps_history=state.solution_steps_history if state else [],
             three_day_task=None,  # Phase 13 webhook flow surfaces this later
             rag_sources_used=state.solution_rag_chunks if state else [],
             last_updated_at=mongo_doc.get("_last_updated"),
@@ -917,8 +920,11 @@ def gemini_session_state(session_id: str):
     return {
         **engine.diagnosis_summary,
         "engine": "gemini",
-        "solution_step": (
-            engine.state.solution_step if engine.state else None
+        # "solution_step": (
+        #     engine.state.solution_step if engine.state else None
+        # ),
+        "solution_substep": (
+            engine.state.solution_substep if engine.state else None
         ),
         "solution_complete": (
             engine.state.solution_complete if engine.state else False
